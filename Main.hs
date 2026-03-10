@@ -26,7 +26,7 @@ ex0 = main' "nf" $ unlines [
   "let f : (A : U 0) -> A -> A = \\A x. x;",
 
   "let IdTy1    : U 2 = cast ((A : U 1) -> A -> A);",
-  "let ConstTy0 : U 1 = (A B : U 0) -> cast A -> cast B -> cast A;",
+  "let ConstTy0 : U 1 = cast ((A B : U 0) -> A -> B -> A);",
   "let id1 : IdTy1 = \\A x. x;",
   "let const0 : ConstTy0 = \\A B x y. x;",
   "let foo : ConstTy0 = id1 ConstTy0 const0;",
@@ -343,13 +343,19 @@ infer cxt = \case
     (u, uty) <- infer (define x vt (vDecode i va) cxt) u  
     pure (Let x (Decode i a) i t u, uty)
 
+
+  -- Here I didn't really know what to put, when I wrote the ellaboration rules down on paper
+  -- there was no synthesis rules for Pi and U, but on this practical implementation we sometime need
+  -- to infer the type of a Pi in examples such as 'let f : U 1 -> U 1 = \\A. A'
+  -- So here there is a maximum rule (like in Andras code) to infer the smallest universe possible
+
   RPi x a b -> do
     (a, i) <- inferU cxt a
     (b, j) <- inferU (bind x (evalTy (env cxt) (Decode i a)) cxt) b
     let m = max i j
     pure (Code m (Pi x (Decode i a) (Decode j b)), VU m)
 
-  RU i -> pure (Code (i+1) (U i), VU (i + 1)) -- Not right, we need to infer the level ?? If we would, must be cast 
+  RU i -> pure (Code (i+1) (U i), VU (i + 1))
 
 
   RLam {} -> report cxt "Can't infer type for lambda expression."
