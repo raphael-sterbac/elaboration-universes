@@ -313,7 +313,6 @@ checkTy cxt t size = case t of
           
       _ -> report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt t_ty
 
-  -- mode switch : casting
   RCast e -> do
     (m, i) <- inferU cxt e
     case size of 
@@ -510,7 +509,7 @@ pAtom =
       withPos (
             (RVar <$> pIdent)
         <|> (RU <$> (pKeyword "U" *> decimal))
-        <|> (applyCast <$> (pKeyword "cast" *> pAtom)) -- <-- Modification ici !
+        <|> (applyCast <$> (pKeyword "cast" *> pAtom))
       )
   <|> parens pRaw
 
