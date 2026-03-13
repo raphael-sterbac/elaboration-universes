@@ -1,0 +1,50 @@
+# =========================
+# Haskell / GHC build files
+# =========================
+dist/
+dist-*
+dist-newstyle/
+cabal-dev/
+*.o
+*.hi
+*.hie
+*.chi
+*.chs.h
+*.dyn_o
+*.dyn_hi
+.hpc
+.cabal-sandbox/
+cabal.sandbox.config
+*.prof
+*.aux
+*.hp
+*.eventlog
+.stack-work/
+cabal.project.local
+cabal.project.local~
+.HTF/
+.ghc.environment.*
+
+# =========================
+# Executables
+# =========================
+# Ignore the generated binary (adjust if your executable has a different name)
+elabzoo-univ-lifts
+*.exe
+
+# =========================
+# Editor / OS files
+# =========================
+*~
+*.swp
+*.swo
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+.vscode/
+.idea/
+*.iml
