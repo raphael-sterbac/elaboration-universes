@@ -25,13 +25,13 @@ ex0 = main' "nf" $ unlines [
   "let g : U 0 -> U 2 = cast f;",
   "let f : (A : U 0) -> A -> A = \\A x. x;",
 
-  "let IdTy1    : U 2 = ((A : U 1) -> cast A -> cast A);",
-  "let ConstTy0 : U 1 = ((A B : U 0) -> cast A -> cast B -> cast A);",
+  "let IdTy1    : U 2 = cast ((A : U 1) -> A -> A);",
+  "let ConstTy0 : U 1 = cast ((A B : U 0) -> A -> B -> A);",
   "let id1 : IdTy1 = \\A x. x;",
   "let const0 : ConstTy0 = \\A B x y. x;",
   "let foo : ConstTy0 = id1 ConstTy0 const0;",
 
-  "let Nat  : U 1 = ((N : U 0) -> ( cast N -> cast N) -> cast N -> cast N) ;",
+  "let Nat  : U 1 = cast ((N : U 0) -> ( N -> N) -> N -> N) ;",
   "let zero : Nat = λ N s z. z;",
   "let one  : Nat = λ N s z. s z;",
   "let five : Nat = \\N s z. s (s (s (s (s z)))) ;",
@@ -41,7 +41,7 @@ ex0 = main' "nf" $ unlines [
   "let hundred  : Nat = mul ten ten ;",
 
   "let Eq1 : (A : U 1) → A → A → U 1",
-  "    = λ A x y. ((P : cast A → U 0) → cast (P x) → cast (P y) );",
+  "    = λ A x y. cast ((P : A → U 0) → (P x) → (P y) );",
 
   "let refl1 : (A : U 1)(x : A) → Eq1 A x x",
   "  = λ A x P px. px;",
@@ -466,6 +466,12 @@ prettyTy = goTy where
 -- instance Show Tm where showsPrec p = prettyTm p []
 
 
+applyCast :: Raw -> Raw
+applyCast (RPi x a b)     = RPi x (applyCast a) (applyCast b)
+applyCast (RU i)          = RU i
+applyCast (RSrcPos pos t) = RSrcPos pos (applyCast t)
+applyCast (RCast t)       = RCast t
+applyCast t               = RCast t
 
 -- parsing
 --------------------------------------------------------------------------------
@@ -504,7 +510,7 @@ pAtom =
       withPos (
             (RVar <$> pIdent)
         <|> (RU <$> (pKeyword "U" *> decimal))
-        <|> (RCast <$> (pKeyword "cast" *> pAtom))
+        <|> (applyCast <$> (pKeyword "cast" *> pAtom)) -- <-- Modification ici !
       )
   <|> parens pRaw
 
