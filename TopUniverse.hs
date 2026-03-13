@@ -1,3 +1,4 @@
+-- Archive on tests with a top universe
 
 module Main where
 
@@ -6,7 +7,7 @@ import Control.Applicative hiding (many, some)
 import Control.Monad
 import Data.Char
 import Data.Void
-import System.Environment ()
+import System.Environment
 import System.Exit
 import Text.Megaparsec
 import Text.Printf
@@ -16,37 +17,38 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 -- import Debug.Trace
 
+
 -- examples
 --------------------------------------------------------------------------------
 
 ex0 = main' "nf" $ unlines [
 
-  "let f : U 1 -> U 1 = \\A. A;",
+  "let f : U 0 -> U 0 = \\A. A;",
   "let g : U 0 -> U 2 = cast f;",
-  "let f : (A : U 0) -> A -> A = \\A x. x;",
+  "let f : (A : U 0) -> cast A -> cast A = \\A x. x;",
 
   "let IdTy1    : U 2 = ((A : U 1) -> cast A -> cast A);",
   "let ConstTy0 : U 1 = ((A B : U 0) -> cast A -> cast B -> cast A);",
-  "let id1 : IdTy1 = \\A x. x;",
-  "let const0 : ConstTy0 = \\A B x y. x;",
-  "let foo : ConstTy0 = id1 ConstTy0 const0;",
+  "let id1 : cast IdTy1 = \\A x. x;",
+  "let const0 : cast ConstTy0 = \\A B x y. x;",
+  "let foo : cast ConstTy0 = id1 ConstTy0 const0;",
 
   "let Nat  : U 1 = ((N : U 0) -> ( cast N -> cast N) -> cast N -> cast N) ;",
-  "let zero : Nat = λ N s z. z;",
-  "let one  : Nat = λ N s z. s z;",
-  "let five : Nat = \\N s z. s (s (s (s (s z)))) ;",
-  "let add  : Nat -> Nat -> Nat = \\a b N s z. a N s (b N s z) ;",
-  "let mul  : Nat -> Nat -> Nat = \\a b N s z. a N (b N s) z ;",
-  "let ten      : Nat = add five five ;",
-  "let hundred  : Nat = mul ten ten ;",
+  "let zero : cast Nat = λ N s z. z;",
+  "let one  : cast Nat = λ N s z. s z;",
+  "let five : cast Nat = \\N s z. s (s (s (s (s z)))) ;",
+  "let add  : cast Nat -> cast Nat -> cast Nat = \\a b N s z. a N s (b N s z) ;",
+  "let mul  : cast Nat -> cast Nat -> cast Nat = \\a b N s z. a N (b N s) z ;",
+  "let ten      : cast Nat = add five five ;",
+  "let hundred  : cast Nat = mul ten ten ;",
 
-  "let Eq1 : (A : U 1) → A → A → U 1",
-  "    = λ A x y. ((P : cast A → U 0) → cast (P x) → cast (P y) );",
+  "let Eq1 : (A : U 1) → cast A → cast A → U 1",
+  "    = λ A x y.  ((P : A → U 0) → cast (P x) → cast (P y));",
 
-  "let refl1 : (A : U 1)(x : A) → Eq1 A x x",
+  "let refl1 : (A : U 1)(x : cast A) → cast (Eq1 A x x)",
   "  = λ A x P px. px;",
 
-  "let p1 : Eq1 Nat ten ten = refl1 Nat ten;",
+  "let p1 : cast (Eq1 Nat ten ten) = refl1 Nat ten;",
   "id1 Nat hundred"
 
   ]
@@ -61,6 +63,16 @@ newtype Ix  = Ix  Int deriving (Eq, Show, Num) via Int
 -- | De Bruijn level.
 newtype Lvl = Lvl Int deriving (Eq, Show, Num) via Int
 
+-- | Universe levels
+data Level = Val Int | Omega
+  deriving (Eq, Show)
+
+instance Ord Level where
+  _     <= Omega = True
+  Omega <= Val _ = False
+  Val i <= Val j = i <= j
+
+
 
 type Name = String
 
@@ -69,6 +81,7 @@ data Raw
   | RLam Name Raw          -- \x. t
   | RApp Raw Raw           -- t u
   | RU Int                 -- U i
+  | RType
   | RPi Name Raw Raw       -- (x : A) -> B
   | RCast Raw              -- casting
   | RLet Name Raw Raw Raw  -- let x : A = t in u
@@ -80,13 +93,13 @@ data Raw
 
 data Ty
   = Pi Name ~Ty Ty
-    | U Int 
-    | Decode Int Tm
+    | U Level 
+    | Decode Level Tm
 
 data Tm
   = Var Ix
   | App Tm ~Tm
-  | Code Int Ty
+  | Code Level Ty
   | Lam Name Tm
   | Let Name Ty Tm Tm
 
@@ -97,20 +110,21 @@ type Env = [Val]
 
 data VTy
   = VPi Name ~VTy (Val -> VTy)
-    | VU Int 
-    | VDecode Int Val
+    | VU Level 
+    | VDecode Level Val
 
 data Val
   = VVar Lvl
   | VApp Val ~Val
-  | VCode Int VTy
+  | VCode Level VTy
   | VLam Name (Val -> Val)
 
 --------------------------------------------------------------------------------
 
-vDecode :: Int -> Val -> VTy
+-- Decode function implementing the beta rule of the constructor
+vDecode :: Level -> Val -> VTy
 vDecode i = \case
-  VCode j a | i == j  -> a
+  VCode j a | i == j  -> a             -- Rule UNIV-BETA
   v                   -> VDecode i v
 
 evalTm :: Env -> Tm -> Val
@@ -128,7 +142,6 @@ evalTy env = \case
   Pi x a b      -> VPi x (evalTy env a) \v -> evalTy (v:env) b
   U i           -> VU i
   Decode i t    -> vDecode i (evalTm env t)
-
 
 lvl2Ix :: Lvl -> Lvl -> Ix
 lvl2Ix (Lvl l) (Lvl x) = Ix (l - x - 1)
@@ -165,7 +178,7 @@ convTm l t u = case (t, u) of
   (u, VLam _ t) ->
     convTm (l + 1) (VApp u (VVar l)) (t (VVar l))
   
-  (VCode i a, VCode j b) | i == j -> convTy l a b
+  (VCode i a, VCode j b) | i == j -> convTy l a b       -- Injectivity of coding
   
   (VVar x  , VVar x'   ) -> x == x'
   (VApp t u, VApp t' u') -> convTm l t t' && convTm l u u'
@@ -179,7 +192,7 @@ convTy l t u = case (t, u) of
        convTy l a a'
     && convTy (l + 1) (b (VVar l)) (b' (VVar l))
 
-  (VDecode i a, VDecode j b) | i == j -> convTm l a b
+  (VDecode i a, VDecode j b) | i == j -> convTm l a b   -- Rule UNIV-EXT (Injectivity of decoding)
 
   _ -> False
 
@@ -239,22 +252,18 @@ showVTy cxt v = showTy cxt $ quoteTy (lvl cxt) v
 
 --------------------------------------------------------------------------------
 
-inferU :: Cxt -> Raw -> M (Tm, Int)
-inferU cxt t = do
-  (t, a) <- infer cxt t
-  case a of
-    VU i -> pure (t, i)
-    _    -> report cxt "expected a type"
-
-
 cast :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
 cast cxt l sourceTy targetTy m =
   if convTy l sourceTy targetTy then
     pure m 
   else case (sourceTy, targetTy) of
   
-  (VU i, VU j) | i + 1 <= j -> 
-    pure $ Code j (Decode i m)
+  (VU i, VU j) -> 
+    case i of
+      Omega -> report cxt "Trying to cast a term in Type"
+      Val k | Val (k + 1) <= j -> pure $ Code j (Decode i m)
+      _ -> report cxt "Invalid cast"
+
 
   (VPi n1 a1 b1, VPi n2 a2 b2) -> do
     let cxt' = bind n2 a2 cxt
@@ -276,55 +285,9 @@ cast cxt l sourceTy targetTy m =
     
     pure $ Lam n2 n_x
 
+  -- TODO: Add a distributivity rule on Pi ? so that we can write cast(A -> A)
+
   _ -> report cxt "Invalid cast"
-
-checkTy :: Cxt -> Raw -> Maybe Int -> M Ty
-checkTy cxt t size = case t of
-  RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
-
-  RU i -> case size of 
-    Nothing -> pure $ U i
-    Just j | i <= j -> pure $ U i
-    Just k -> report cxt ("Size issue: U " ++ show i ++ ", but expected a universe in U " ++ show k)
-
-  RPi x a b -> do
-    a' <- checkTy cxt a size
-    let cxt' = bind x (evalTy (env cxt) a') cxt
-    b' <- checkTy cxt' b size
-    pure $ Pi x a' b'
-
-  RVar x -> do
-    (t, j) <- inferU cxt t
-    case size of 
-      Nothing -> pure $ Decode j t
-      Just k -> report cxt "Type mismatch: implicit coercion is not allowed. Use 'cast' if intended."
-  
-  RApp t u -> do
-    (t_tm, t_ty) <- infer cxt t
-    case t_ty of
-      VPi _ a b -> do
-        u_tm <- check cxt u a
-        let v_u = evalTm (env cxt) u_tm
-        case b v_u of
-          VU i -> case size of 
-            Nothing -> pure $ Decode i (App t_tm u_tm)
-            Just k -> report cxt "Type mismatch: implicit coercion is not allowed. Use 'cast' if intended."
-          _ -> report cxt "Expected a universe in the codomain of the application"
-          
-      _ -> report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt t_ty
-
-  -- mode switch : casting
-  RCast e -> do
-    (m, i) <- inferU cxt e
-    case size of 
-      Nothing -> pure (Decode i m)
-      Just j | i <= j -> do
-        u <- cast cxt (lvl cxt) (VU i) (VU j) m
-        pure $ Decode j u
-      Just k -> report cxt ("Size issue: casting from U " ++ show i ++ ", to " ++ show k)
-
-  _ -> report cxt "Type mismatch: implicit coercion is not allowed. Use 'cast' if intended."
-
 
 check :: Cxt -> Raw -> VTy -> M Tm
 check cxt t a = case (t, a) of
@@ -333,24 +296,27 @@ check cxt t a = case (t, a) of
   (RLam x t, VPi x' a b) ->
     Lam x <$> check (bind x a cxt) t (b (VVar (lvl cxt)))
 
-  (RU i, VU j) -> do
-    u <- checkTy cxt (RU i) (Just j)
-    pure $ Code j u
+  (RU i, VU j) | Val (i + 1) <= j -> 
+    pure $ Code j (U (Val i))
+
+  (RType, VU Omega) -> pure $ Code Omega (U Omega) -- TODO: Weird U omega : U omega
+    
+  (RType, VU (Val _)) ->
+    report cxt "Type is too large to fit in a standard universe."
 
   (RPi x a b, VU i) -> do
-    a' <- checkTy cxt a (Just i)
-    let cxt' = bind x (evalTy (env cxt) a') cxt
-    b' <- checkTy cxt' b (Just i)
-    pure $ Code i (Pi x a' b')
-
+    a' <- check cxt a (VU i)
+    let cxt' = bind x (evalTy (env cxt) (Decode i a')) cxt
+    b' <- check cxt' b (VU i)
+    pure $ Code i (Pi x (Decode i a') (Decode i b'))
 
   (RLet x a t u, a') -> do
-    a <- checkTy cxt a Nothing
-    let ~va = evalTy (env cxt) a
-    t <- check cxt t va
+    a <- check cxt a (VU Omega)
+    let ~va = evalTm (env cxt) a
+    t <- check cxt t (vDecode Omega va)
     let ~vt = evalTm (env cxt) t
-    u <- check (define x vt va cxt) u a' 
-    pure (Let x a t u)
+    u <- check (define x vt (vDecode Omega va) cxt) u a' 
+    pure (Let x (Decode Omega a) t u)
 
   -- mode switch : casting
   (RCast e, aTy) -> do
@@ -385,17 +351,19 @@ infer cxt = \case
         report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt tty
 
   RLet x a t u -> do
-    a <- checkTy cxt a Nothing
-    let ~va = evalTy (env cxt) a
-    t <- check cxt t va
+    a <- check cxt a (VU Omega)
+    let ~va = evalTm (env cxt) a
+    t <- check cxt t (vDecode Omega va)
     let ~vt = evalTm (env cxt) t
-    (u, uty) <- infer (define x vt va cxt) u  
-    pure (Let x a t u, uty)
+    (u, uty) <- infer (define x vt (vDecode Omega va) cxt) u  
+    pure (Let x (Decode Omega a) t u, VU Omega)
+
+  RType -> pure (Code Omega (U Omega), VU Omega) -- TODO: Weird, U omega : U omega
 
 
-  RU {} -> report cxt "Can't infer type for universe"
-  RPi {} -> report cxt "Can't infer type for product type"
   RLam {} -> report cxt "Can't infer type for lambda expression."
+  RU {} -> report cxt "Can't infer type of universe"
+  RPi {} -> report cxt "Can't infer type of Pi"
   RCast {} -> report cxt "Cannot synthesise a cast expression; it must be checked."
 
 
@@ -486,7 +454,7 @@ pArrow   = symbol "→" <|> symbol "->"
 decimal  = lexeme L.decimal
 
 keyword :: String -> Bool
-keyword x = x == "let" || x == "λ" || x == "U" || x == "cast"
+keyword x = x == "let" || x == "λ" || x == "U" || x == "cast" || x == "Type"
 
 pIdent :: Parser Name
 pIdent = try $ do
@@ -504,6 +472,7 @@ pAtom =
       withPos (
             (RVar <$> pIdent)
         <|> (RU <$> (pKeyword "U" *> decimal))
+        <|> (RType <$ pKeyword "Type")             
         <|> (RCast <$> (pKeyword "cast" *> pAtom))
       )
   <|> parens pRaw

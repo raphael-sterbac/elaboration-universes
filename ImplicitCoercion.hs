@@ -1,3 +1,4 @@
+-- Archive of weird implementation with a kind of implicit coercion 
 
 module Main where
 
@@ -25,13 +26,13 @@ ex0 = main' "nf" $ unlines [
   "let g : U 0 -> U 2 = cast f;",
   "let f : (A : U 0) -> A -> A = \\A x. x;",
 
-  "let IdTy1    : U 2 = ((A : U 1) -> cast A -> cast A);",
-  "let ConstTy0 : U 1 = ((A B : U 0) -> cast A -> cast B -> cast A);",
+  "let IdTy1    : U 2 = ((A : U 1) -> A -> A);",
+  "let ConstTy0 : U 1 = ((A B : U 0) -> A -> B -> A);",
   "let id1 : IdTy1 = \\A x. x;",
   "let const0 : ConstTy0 = \\A B x y. x;",
   "let foo : ConstTy0 = id1 ConstTy0 const0;",
 
-  "let Nat  : U 1 = ((N : U 0) -> ( cast N -> cast N) -> cast N -> cast N) ;",
+  "let Nat  : U 1 = ((N : U 0) -> ( N -> N) -> N -> N) ;",
   "let zero : Nat = λ N s z. z;",
   "let one  : Nat = λ N s z. s z;",
   "let five : Nat = \\N s z. s (s (s (s (s z)))) ;",
@@ -41,7 +42,7 @@ ex0 = main' "nf" $ unlines [
   "let hundred  : Nat = mul ten ten ;",
 
   "let Eq1 : (A : U 1) → A → A → U 1",
-  "    = λ A x y. ((P : cast A → U 0) → cast (P x) → cast (P y) );",
+  "    = λ A x y. ((P : A → U 0) → P x → P y);",
 
   "let refl1 : (A : U 1)(x : A) → Eq1 A x x",
   "  = λ A x P px. px;",
@@ -297,7 +298,8 @@ checkTy cxt t size = case t of
     (t, j) <- inferU cxt t
     case size of 
       Nothing -> pure $ Decode j t
-      Just k -> report cxt "Type mismatch: implicit coercion is not allowed. Use 'cast' if intended."
+      Just k | j <= k -> pure $ Decode j t
+      Just k -> report cxt ("Size issue: variable is in U " ++ show j ++ ", but expected at most U " ++ show k)
   
   RApp t u -> do
     (t_tm, t_ty) <- infer cxt t
@@ -308,22 +310,16 @@ checkTy cxt t size = case t of
         case b v_u of
           VU i -> case size of 
             Nothing -> pure $ Decode i (App t_tm u_tm)
-            Just k -> report cxt "Type mismatch: implicit coercion is not allowed. Use 'cast' if intended."
+            Just k | i <= k -> pure $ Decode i (App t_tm u_tm)
+            Just k -> report cxt $ "Size issue: application codomain is in U " ++ show i ++ ", but expected at most U " ++ show k
           _ -> report cxt "Expected a universe in the codomain of the application"
           
       _ -> report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt t_ty
+    
 
-  -- mode switch : casting
-  RCast e -> do
-    (m, i) <- inferU cxt e
-    case size of 
-      Nothing -> pure (Decode i m)
-      Just j | i <= j -> do
-        u <- cast cxt (lvl cxt) (VU i) (VU j) m
-        pure $ Decode j u
-      Just k -> report cxt ("Size issue: casting from U " ++ show i ++ ", to " ++ show k)
-
-  _ -> report cxt "Type mismatch: implicit coercion is not allowed. Use 'cast' if intended."
+  RCast {} ->  report cxt "Cast is not a type??"
+  RLet x a t u -> report cxt "Let binding is not a type"
+  RLam {} -> report cxt "Lambda abstraction is not a type"
 
 
 check :: Cxt -> Raw -> VTy -> M Tm
