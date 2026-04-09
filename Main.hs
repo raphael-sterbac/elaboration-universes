@@ -246,8 +246,8 @@ inferU cxt t = do
     _    -> report cxt "expected a type"
 
 
-cast :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
-cast cxt l sourceTy targetTy m =
+coe :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
+coe cxt l sourceTy targetTy m =
   if convTy l sourceTy targetTy then
     pure m 
   else case (sourceTy, targetTy) of
@@ -259,7 +259,7 @@ cast cxt l sourceTy targetTy m =
     let cxt' = bind n2 a2 cxt
     let l' = lvl cxt'
     
-    u_x <- cast cxt' l' a2 a1 (Var (Ix 0))
+    u_x <- coe cxt' l' a2 a1 (Var (Ix 0))
 
     let env' = env cxt'
     let vu_x = evalTm env' u_x
@@ -271,11 +271,11 @@ cast cxt l sourceTy targetTy m =
                  
     let m_u_x = quoteTm l' vApp
     
-    n_x <- cast cxt' l' (b1 vu_x) (b2 (VVar l)) m_u_x
+    n_x <- coe cxt' l' (b1 vu_x) (b2 (VVar l)) m_u_x
     
     pure $ Lam n2 n_x
 
-  _ -> report cxt "Invalid cast"
+  _ -> report cxt "Invalid coercion"
 
 checkTy :: Cxt -> Raw -> Maybe Int -> M Ty
 checkTy cxt t size = case t of
@@ -292,12 +292,15 @@ checkTy cxt t size = case t of
     b' <- checkTy cxt' b size
     pure $ Pi x a' b'
 
+
+{- TODO : Don't need this anymore but double check
+
   RVar x -> do
     (t, j) <- inferU cxt t
     case size of 
       Nothing -> pure $ Decode j t
-      Just k -> pure $ Decode j t -- TODO: double check
-  
+      Just k -> pure $ Decode j t 
+
   RApp t u -> do
     (t_tm, t_ty) <- infer cxt t
     case t_ty of
@@ -307,17 +310,18 @@ checkTy cxt t size = case t of
         case b v_u of
           VU i -> case size of 
             Nothing -> pure $ Decode i (App t_tm u_tm)
-            Just k -> pure $ Decode k (App t_tm u_tm) -- TODO : double check
+            Just k | i <= k -> pure $ Decode i (App t_tm u_tm) 
+            Just k -> report cxt ("Size issue: U " ++ show i ++ ", but expected a universe in U " ++ show k)
           _ -> report cxt "Expected a universe in the codomain of the application"
           
-      _ -> report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt t_ty
+      _ -> report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt t_ty -}
 
   _ -> do 
     (m, i) <- inferU cxt t
     case size of 
       Nothing -> pure (Decode i m)
       Just j | i <= j -> do
-        u <- cast cxt (lvl cxt) (VU i) (VU j) m
+        u <- coe cxt (lvl cxt) (VU i) (VU j) m
         pure $ Decode j u
       Just k -> report cxt ("Size issue: casting from U " ++ show i ++ ", to " ++ show k)
 
@@ -329,16 +333,9 @@ check cxt t a = case (t, a) of
   (RLam x t, VPi x' a b) ->
     Lam x <$> check (bind x a cxt) t (b (VVar (lvl cxt)))
 
-  (RU i, VU j) -> do
-    u <- checkTy cxt (RU i) (Just j)
-    pure $ Code j u
-
-  (RPi x a b, VU i) -> do
-    a' <- checkTy cxt a (Just i)
-    let cxt' = bind x (evalTy (env cxt) a') cxt
-    b' <- checkTy cxt' b (Just i)
-    pure $ Code i (Pi x a' b')
-
+  (_, VU i) -> do
+    u <- checkTy cxt t (Just i)
+    pure $ Code i u
 
   (RLet x a t u, a') -> do
     a <- checkTy cxt a Nothing
@@ -351,7 +348,7 @@ check cxt t a = case (t, a) of
   -- mode switch : conversion
   _ -> do
     (m, bTy) <- infer cxt t
-    cast cxt (lvl cxt) bTy a m
+    coe cxt (lvl cxt) bTy a m
     
 infer :: Cxt -> Raw -> M (Tm, VTy)
 infer cxt = \case
