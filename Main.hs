@@ -248,37 +248,43 @@ inferU cxt t = do
 
 coe :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
 coe cxt l sourceTy targetTy m =
+
+  -- First case : Try to unify the types (identity coercion)
+  -- TODO : Maybe we want to do that in the last case ? Linked to issue with unification, and taking the most general thing
   if convTy l sourceTy targetTy then
     pure m 
+  
+  -- Second case : Try to cast
   else case (sourceTy, targetTy) of
   
-  (VU i, VU j) | i + 1 <= j -> 
-    pure $ Code j (Decode i m)
+    (VU i, VU j) | i + 1 <= j -> 
+      pure $ Code j (Decode i m)
 
-  (VPi n1 a1 b1, VPi n2 a2 b2) -> do
-    let cxt' = bind n2 a2 cxt
-    let l' = lvl cxt'
-    
-    u_x <- coe cxt' l' a2 a1 (Var (Ix 0))
+    (VPi n1 a1 b1, VPi n2 a2 b2) -> do
+      let cxt' = bind n2 a2 cxt
+      let l' = lvl cxt'
+      
+      u_x <- coe cxt' l' a2 a1 (Var (Ix 0))
 
-    let env' = env cxt'
-    let vu_x = evalTm env' u_x
-    
-    let vm = evalTm (env cxt) m
-    let vApp = case vm of
-                 VLam _ f -> f vu_x
-                 _        -> VApp vm vu_x
-                 
-    let m_u_x = quoteTm l' vApp
-    
-    n_x <- coe cxt' l' (b1 vu_x) (b2 (VVar l)) m_u_x
-    
-    pure $ Lam n2 n_x
+      let env' = env cxt'
+      let vu_x = evalTm env' u_x
+      
+      let vm = evalTm (env cxt) m
+      let vApp = case vm of
+                  VLam _ f -> f vu_x
+                  _        -> VApp vm vu_x
+                  
+      let m_u_x = quoteTm l' vApp
+      
+      n_x <- coe cxt' l' (b1 vu_x) (b2 (VVar l)) m_u_x
+      
+      pure $ Lam n2 n_x
 
-  _ -> report cxt "Invalid coercion"
+    _ -> report cxt "Invalid coercion"
 
 checkTy :: Cxt -> Raw -> Maybe Int -> M Ty
 checkTy cxt t size = case t of
+
   RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
 
   RU i -> case size of 
@@ -292,30 +298,7 @@ checkTy cxt t size = case t of
     b' <- checkTy cxt' b size
     pure $ Pi x a' b'
 
-
-{- TODO : Don't need this anymore but double check
-
-  RVar x -> do
-    (t, j) <- inferU cxt t
-    case size of 
-      Nothing -> pure $ Decode j t
-      Just k -> pure $ Decode j t 
-
-  RApp t u -> do
-    (t_tm, t_ty) <- infer cxt t
-    case t_ty of
-      VPi _ a b -> do
-        u_tm <- check cxt u a
-        let v_u = evalTm (env cxt) u_tm
-        case b v_u of
-          VU i -> case size of 
-            Nothing -> pure $ Decode i (App t_tm u_tm)
-            Just k | i <= k -> pure $ Decode i (App t_tm u_tm) 
-            Just k -> report cxt ("Size issue: U " ++ show i ++ ", but expected a universe in U " ++ show k)
-          _ -> report cxt "Expected a universe in the codomain of the application"
-          
-      _ -> report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt t_ty -}
-
+  -- mode switch
   _ -> do 
     (m, i) <- inferU cxt t
     case size of 
@@ -345,7 +328,7 @@ check cxt t a = case (t, a) of
     u <- check (define x vt va cxt) u a' 
     pure (Let x a t u)
 
-  -- mode switch : conversion
+  -- mode switch
   _ -> do
     (m, bTy) <- infer cxt t
     coe cxt (lvl cxt) bTy a m

@@ -25,17 +25,17 @@ import qualified Text.Megaparsec.Char.Lexer as L
 ex0 = main' "nf" $ unlines [
 
   "let f : U 1 -> U 1 = \\A. A;",
-  "let g : U 0 -> U 2 = cast f;",
+  "let g : U 0 -> U 2 = f;",
   "let f : (A : U 0) -> A -> A = \\A x. x;",
 
-  "let IdTy1    : U 2 = cast ((A : U 1) -> A -> A);",
-  "let ConstTy0 : U 1 = cast ((A B : U 0) -> A -> B -> A);",
+  "let IdTy1    : U 2 = (A : U 1) -> A -> A;",
+  "let ConstTy0 : U 1 = (A B : U 0) -> A -> B -> A;",
   "let id1 : IdTy1 = \\A x. x;",
   "let const0 : ConstTy0 = \\A B x y. x;",
   
   "let foo : ConstTy0 = id1 _ const0;",
 
-  "let Nat  : U 1 = cast ((N : U 0) -> ( N -> N) -> N -> N) ;",
+  "let Nat  : U 1 = (N : U 0) -> ( N -> N) -> N -> N ;",
   "let zero : Nat = λ N s z. z;",
   "let one  : Nat = λ N s z. s z;",
   "let five : Nat = \\N s z. s (s (s (s (s z)))) ;",
@@ -45,7 +45,7 @@ ex0 = main' "nf" $ unlines [
   "let hundred  : Nat = mul ten ten ;",
 
   "let Eq1 : (A : U 1) → A → A → U 1",
-  "    = λ A x y. cast ((P : A → U 0) → (P x) → (P y) );",
+  "    = λ A x y.  (P : A → U 0) → (P x) → (P y) ;",
 
   "let refl1 : (A : U 1)(x : A) → Eq1 A x x",
   "  = λ A x P px. px;",
@@ -70,10 +70,9 @@ data Raw
   | RLam Name Raw          
   | RApp Raw Raw           
   | RU Int                 
-  | RPi Name Raw Raw       
-  | RCast Raw              
+  | RPi Name Raw Raw            
   | RLet Name Raw Raw Raw  
-  | RHole                 
+  | RHole                   -- Holes
   | RSrcPos SourcePos Raw  
   deriving Show
 
@@ -380,15 +379,10 @@ cast cxt sourceTy targetTy m = do
       unifyTy cxt sTy tTy
       pure m
 
-checkTy :: Cxt -> Raw -> Maybe Int -> IO Ty
+checkTy :: Cxt -> Raw -> Maybe Int -> M Ty
 checkTy cxt t size = case t of
-  RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
 
-  RHole -> case size of 
-    Just k -> do
-      m <- freshMeta cxt
-      pure $ Decode k m
-    Nothing -> report cxt "Cannot infer universe level of hole"
+  RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
 
   RU i -> case size of 
     Nothing -> pure $ U i
@@ -401,80 +395,42 @@ checkTy cxt t size = case t of
     b' <- checkTy cxt' b size
     pure $ Pi x a' b'
 
-  RVar x -> do
-    (t_tm, j) <- inferU cxt t
-    case size of 
-      Nothing -> pure $ Decode j t_tm
-      Just k -> report cxt "Type mismatch: implicit coercion is not allowed. Use 'cast' if intended."
-  
-  RApp t u -> do
-    (t_tm, t_ty) <- infer cxt t
-    t_ty' <- forceTy t_ty
-    case t_ty' of
-      VPi _ a b -> do
-        u_tm <- check cxt u a
-        let v_u = evalTm (env cxt) u_tm
-        case b v_u of
-          VU i -> case size of 
-            Nothing -> pure $ Decode i (App t_tm u_tm)
-            Just k -> report cxt "Type mismatch: implicit coercion is not allowed. Use 'cast' if intended."
-          _ -> report cxt "Expected a universe in the codomain of the application"
-          
-      _ -> report cxt "Expected a function type in Type application."
-
-  RCast e -> do
-    (m, i) <- inferU cxt e
+  -- mode switch
+  _ -> do 
+    (m, i) <- inferU cxt t
     case size of 
       Nothing -> pure (Decode i m)
       Just j | i <= j -> do
-        u <- cast cxt (VU i) (VU j) m
+        u <- coe cxt (lvl cxt) (VU i) (VU j) m
         pure $ Decode j u
       Just k -> report cxt ("Size issue: casting from U " ++ show i ++ ", to " ++ show k)
 
-  -- TODO: remove explicit cast and change this to call cast anyway
-  _ -> report cxt "Type mismatch: implicit coercion is not allowed. Use 'cast' if intended."
 
+check :: Cxt -> Raw -> VTy -> M Tm
+check cxt t a = case (t, a) of
+  (RSrcPos pos t, a) -> check (cxt {pos = pos}) t a
 
-check :: Cxt -> Raw -> VTy -> IO Tm
-check cxt t a = do
-  a <- forceTy a
-  case (t, a) of
-    (RSrcPos pos t, a) -> check (cxt {pos = pos}) t a
-    
-    (RHole, a) -> freshMeta cxt
+  (RLam x t, VPi x' a b) ->
+    Lam x <$> check (bind x a cxt) t (b (VVar (lvl cxt)))
 
-    (RLam x t, VPi x' a b) ->
-      Lam x <$> check (bind x a cxt) t (b (vVar (lvl cxt)))
+  (_, VU i) -> do
+    u <- checkTy cxt t (Just i)
+    pure $ Code i u
 
-    (RU i, VU j) -> do
-      u <- checkTy cxt (RU i) (Just j)
-      pure $ Code j u
+  (RLet x a t u, a') -> do
+    a <- checkTy cxt a Nothing
+    let ~va = evalTy (env cxt) a
+    t <- check cxt t va
+    let ~vt = evalTm (env cxt) t
+    u <- check (define x vt va cxt) u a' 
+    pure (Let x a t u)
 
-    (RPi x dom cod, VU i) -> do
-      dom' <- checkTy cxt dom (Just i)
-      let cxt' = bind x (evalTy (env cxt) dom') cxt
-      cod' <- checkTy cxt' cod (Just i)
-      pure $ Code i (Pi x dom' cod')
+  -- mode switch
+  _ -> do
+    (m, bTy) <- infer cxt t
+    coe cxt (lvl cxt) bTy a m
 
-    (RLet x a_ty t u, a') -> do
-      a_ty_c <- checkTy cxt a_ty Nothing
-      let ~va = evalTy (env cxt) a_ty_c
-      t_c <- check cxt t va
-      let ~vt = evalTm (env cxt) t_c
-      u_c <- check (define x vt va cxt) u a' 
-      pure (Let x a_ty_c t_c u_c)
-
-    (RCast e, aTy) -> do
-      (m, bTy) <- infer cxt e
-      cast cxt bTy aTy m
-
-    _ -> do
-      -- Mode switch : infer and unify
-      (m, bTy) <- infer cxt t
-      unifyTy cxt a bTy
-      pure m
-
-infer :: Cxt -> Raw -> IO (Tm, VTy)
+infer :: Cxt -> Raw -> M (Tm, VTy)
 infer cxt = \case
   RSrcPos pos t -> infer (cxt {pos = pos}) t
 
@@ -486,31 +442,26 @@ infer cxt = \case
     go 0 (types cxt)
 
   RApp t u -> do
-    (t', tty) <- infer cxt t
-    tty' <- forceTy tty
-    case tty' of
+    (t, tty) <- infer cxt t
+    case tty of
       VPi _ a b -> do
-        u' <- check cxt u a
-        pure (App t' u', b (evalTm (env cxt) u'))
-      _ -> do
-        -- TODO: Here try to unify by adding fresh metas for the pi
-        ttyStr <- showVTy cxt tty'
-        report cxt $ "Expected a function type, instead inferred:\n\n  " ++ ttyStr
-      
+        u <- check cxt u a
+        pure (App t u, b (evalTm (env cxt) u))
+      tty ->
+        report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt tty
 
   RLet x a t u -> do
-    a' <- checkTy cxt a Nothing
-    let ~va = evalTy (env cxt) a'
-    t' <- check cxt t va
-    let ~vt = evalTm (env cxt) t'
-    (u', uty) <- infer (define x vt va cxt) u  
-    pure (Let x a' t' u', uty)
-    
-  RHole -> report cxt "Cannot infer type for a hole"
+    a <- checkTy cxt a Nothing
+    let ~va = evalTy (env cxt) a
+    t <- check cxt t va
+    let ~vt = evalTm (env cxt) t
+    (u, uty) <- infer (define x vt va cxt) u  
+    pure (Let x a t u, uty)
+
+
   RU {} -> report cxt "Can't infer type for universe"
   RPi {} -> report cxt "Can't infer type for product type"
   RLam {} -> report cxt "Can't infer type for lambda expression."
-  RCast {} -> report cxt "Cannot synthesise a cast expression; it must be checked."
 
 
 -- printing
@@ -574,12 +525,6 @@ prettyTy = goTy where
     Decode i t   -> ('<':).prettyTm letp ns t.('>':)
 
 
-applyCast :: Raw -> Raw
-applyCast (RPi x a b)     = RPi x (applyCast a) (applyCast b)
-applyCast (RU i)          = RU i
-applyCast (RSrcPos pos t) = RSrcPos pos (applyCast t)
-applyCast (RCast t)       = RCast t
-applyCast t               = RCast t
 
 -- parsing
 --------------------------------------------------------------------------------
@@ -657,9 +602,6 @@ pLet = do
   u <- pRaw
   pure $ RLet x a t u
 
-pCast = do
-  pKeyword "cast"
-  RCast <$> parens pRaw
 
 pRaw = withPos (pLam <|> pLet <|> try pPi <|> funOrSpine)
 pSrc = ws *> pRaw <* eof
