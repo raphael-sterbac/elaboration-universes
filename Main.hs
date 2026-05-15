@@ -107,11 +107,6 @@ data Val
 
 --------------------------------------------------------------------------------
 
-vDecode :: Int -> Val -> VTy
-vDecode i = \case
-  VCode j a | i == j  -> a
-  v                   -> VDecode i v
-
 evalTm :: Env -> Tm -> Val
 evalTm env = \case
   Var (Ix x)    -> env !! x
@@ -119,14 +114,20 @@ evalTm env = \case
                      (VLam _ t, u) -> t u
                      (t       , u) -> VApp t u
   Lam x t       -> VLam x \v -> evalTm (v:env) t
-  Code i a      -> VCode i (evalTy env a)
   Let x _ t u -> evalTm (evalTm env t : env) u
+
+  -- Case of a Coding
+  Code i a      -> VCode i (evalTy env a)
 
 evalTy :: Env -> Ty -> VTy
 evalTy env = \case
   Pi x a b      -> VPi x (evalTy env a) \v -> evalTy (v:env) b
   U i           -> VU i
-  Decode i t    -> vDecode i (evalTm env t)
+
+  -- Case of a Decoding
+  Decode i t    -> case evalTm env t of
+    VCode j a | i == j  -> a             -- Beta Rule for the Universe
+    v                   -> VDecode i v
 
 
 lvl2Ix :: Lvl -> Lvl -> Ix
@@ -137,37 +138,38 @@ quoteTm l = \case
   VVar x      -> Var (lvl2Ix l x)
   VApp t u    -> App (quoteTm l t) (quoteTm l u)
   VLam x t    -> Lam x (quoteTm (l + 1) (t (VVar l)))
+
+  -- Case of a Coding
   VCode i a   -> Code i (quoteTy l a)
 
 quoteTy :: Lvl -> VTy -> Ty
 quoteTy l = \case
   VPi  x a b  -> Pi x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
   VU i        -> U i
+
+  -- Case of a Decoding
   VDecode i t -> Decode i (quoteTm l t)
 
 nf :: Env -> Tm -> Tm
 nf env t = quoteTm (Lvl (length env)) (evalTm env t)
 
-nf0 :: Tm -> Tm
-nf0 = nf []
-
-nTimes :: Int -> (a -> a) -> (a -> a)
-nTimes n f ~a | n <= 0 = a
-nTimes n f ~a = nTimes (n - 1) f (f a)
-
 convTm :: Lvl -> Val -> Val -> Bool
 convTm l t u = case (t, u) of
   (VLam _ t, VLam _ t') ->
     convTm (l + 1) (t (VVar l)) (t' (VVar l))
+
   (VLam _ t, u) ->
     convTm (l + 1) (t (VVar l)) (VApp u (VVar l))
   (u, VLam _ t) ->
     convTm (l + 1) (VApp u (VVar l)) (t (VVar l))
-  
-  (VCode i a, VCode j b) | i == j -> convTy l a b
-  
+
   (VVar x  , VVar x'   ) -> x == x'
   (VApp t u, VApp t' u') -> convTm l t t' && convTm l u u'
+
+  -- Injectivity of the Coding 
+  -- TODO : justify this from the metatheory !
+  (VCode i a, VCode j b) | i == j -> convTy l a b
+
   _ -> False
 
 convTy :: Lvl -> VTy -> VTy -> Bool
@@ -178,6 +180,7 @@ convTy l t u = case (t, u) of
        convTy l a a'
     && convTy (l + 1) (b (VVar l)) (b' (VVar l))
 
+  -- Two decoded types are equal if their codes are equal (Injectivity of the decoding map)
   (VDecode i a, VDecode j b) | i == j -> convTm l a b
 
   _ -> False
@@ -208,6 +211,9 @@ define x ~t ~a (Cxt env types l pos) =
 
 -- | Typechecking monad. We annotate the error with the current source position.
 type M = Either (String, SourcePos)
+
+
+-- Printing and error reporting
 
 report :: Cxt -> String -> M a
 report cxt msg = Left (msg, pos cxt)
@@ -247,40 +253,34 @@ inferU cxt t = do
 
 
 coe :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
-coe cxt l sourceTy targetTy m =
+coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
+  (VU i, VU j) | i <= j -> 
+    pure $ Code j (Decode i m)
 
-  -- First case : Try to unify the types (identity coercion)
-  -- TODO : Maybe we want to do that in the last case ? Linked to issue with unification, and taking the most general thing
-  if convTy l sourceTy targetTy then
-    pure m 
-  
-  -- Second case : Try to cast
-  else case (sourceTy, targetTy) of
-  
-    (VU i, VU j) | i + 1 <= j -> 
-      pure $ Code j (Decode i m)
+  (VPi n1 a1 b1, VPi n2 a2 b2) -> do
+    let cxt' = bind n2 a2 cxt
+    let l' = lvl cxt'
+    
+    u_x <- coe cxt' l' a2 a1 (Var (Ix 0))
 
-    (VPi n1 a1 b1, VPi n2 a2 b2) -> do
-      let cxt' = bind n2 a2 cxt
-      let l' = lvl cxt'
-      
-      u_x <- coe cxt' l' a2 a1 (Var (Ix 0))
+    let env' = env cxt'
+    let vu_x = evalTm env' u_x
+    
+    let vm = evalTm (env cxt) m
+    let vApp = case vm of
+                VLam _ f -> f vu_x
+                _        -> VApp vm vu_x
+                
+    let m_u_x = quoteTm l' vApp
+    
+    n_x <- coe cxt' l' (b1 vu_x) (b2 (VVar l)) m_u_x
+    
+    pure $ Lam n2 n_x
 
-      let env' = env cxt'
-      let vu_x = evalTm env' u_x
-      
-      let vm = evalTm (env cxt) m
-      let vApp = case vm of
-                  VLam _ f -> f vu_x
-                  _        -> VApp vm vu_x
-                  
-      let m_u_x = quoteTm l' vApp
-      
-      n_x <- coe cxt' l' (b1 vu_x) (b2 (VVar l)) m_u_x
-      
-      pure $ Lam n2 n_x
-
-    _ -> report cxt "Invalid coercion"
+  _ -> 
+    if convTy l sourceTy targetTy then
+      pure m 
+    else report cxt "Error: Invalid coercion"
 
 checkTy :: Cxt -> Raw -> Maybe Int -> M Ty
 checkTy cxt t size = case t of
@@ -289,7 +289,7 @@ checkTy cxt t size = case t of
 
   RU i -> case size of 
     Nothing -> pure $ U i
-    Just j | i <= j -> pure $ U i
+    Just j | i < j -> pure $ U i
     Just k -> report cxt ("Size issue: U " ++ show i ++ ", but expected a universe in U " ++ show k)
 
   RPi x a b -> do
@@ -300,13 +300,14 @@ checkTy cxt t size = case t of
 
   -- mode switch
   _ -> do 
-    (m, i) <- inferU cxt t
-    case size of 
-      Nothing -> pure (Decode i m)
-      Just j | i <= j -> do
-        u <- coe cxt (lvl cxt) (VU i) (VU j) m
-        pure $ Decode j u
-      Just k -> report cxt ("Size issue: casting from U " ++ show i ++ ", to " ++ show k)
+    (t, a) <- infer cxt t
+    case a of
+      VU i -> case size of 
+        Nothing -> pure (Decode i t)
+        Just j | i <= j -> pure (Decode i t)
+        Just k -> report cxt ("Size issue: got a code at level " ++ show i ++ ", but expected  " ++ show k)
+      _    -> report cxt "Elaboration error: Expected a code"
+    
 
 
 check :: Cxt -> Raw -> VTy -> M Tm
@@ -558,7 +559,7 @@ mainWith getOpt getRaw = do
       case infer (emptyCxt (initialPos file)) t of
         Left err -> displayError file err
         Right (t, a) -> do
-          putStrLn $ showTm0 $ nf0 t
+          putStrLn $ showTm0 $ nf [] t
           putStrLn "  :"
           putStrLn $ showTy0 $ quoteTy 0 a
     ["elab"] -> do
