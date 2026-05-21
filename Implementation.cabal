@@ -12,7 +12,7 @@ build-type:     Simple
 
 
 executable elabzoo-univ-lifts
-  main-is: Main.hs
+  main-is: Datatypes.hs
   hs-source-dirs:
       ./.
   default-extensions: BlockArguments DerivingVia LambdaCase NoMonomorphismRestriction OverloadedStrings PatternSynonyms RecordWildCards StandaloneDeriving Strict TupleSections ViewPatterns
