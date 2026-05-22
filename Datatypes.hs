@@ -6,6 +6,8 @@ import Control.Applicative hiding (many, some)
 import Control.Monad
 import Data.Char
 import Data.Void
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
 import System.Environment ()
 import System.Exit
 import Text.Megaparsec
@@ -82,7 +84,7 @@ data Raw
   | RPi Name Raw Raw       -- (x : A) -> B
   | RLet Name Raw Raw Raw  -- let x : A = t in u
   | RSrcPos SourcePos Raw  -- source position for error reporting
-  | RData Name [(Name, Raw)] Raw [(Name, Raw)] Raw
+  | RData Name [(Name, Raw)] Raw (NonEmpty (Name, Raw)) Raw -- Datatype definition
   deriving Show
 
 -- core syntax
@@ -759,11 +761,11 @@ pData = do
   ty <- pRaw
   pKeyword "where"
   char '{'
-  constrs <- sepEndBy ((,) <$> pBinder <*> (symbol ":" *> pRaw)) (char ';')
+  constrs <- sepEndBy1 ((,) <$> pBinder <*> (symbol ":" *> pRaw)) (char ';')
   char '}'
   char ';'
   u <- pRaw
-  pure $ RData x params ty constrs u
+  pure $ RData x params ty (NE.fromList constrs) u
 
 pBinder = pIdent <|> symbol "_"
 
