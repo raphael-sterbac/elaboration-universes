@@ -21,6 +21,16 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 ex0 = main' "nf" $ unlines [
 
+  "data Bool : U 0 where {",
+  "  true : Bool ;",
+  "  false : Bool",
+  "} ;",
+
+  "data List (A : U 0) : U 0 where {",
+  "  nil : List A ;",
+  "  cons : A -> List A -> List A",
+  "} ;",
+
   "let f : U 1 -> U 1 = \\A. A;",
   "let g : U 0 -> U 2 = f;",
   "let f : (A : U 0) -> A -> A = \\A x. x;",
@@ -72,6 +82,7 @@ data Raw
   | RPi Name Raw Raw       -- (x : A) -> B
   | RLet Name Raw Raw Raw  -- let x : A = t in u
   | RSrcPos SourcePos Raw  -- source position for error reporting
+  | RData Name [(Name, Raw)] Raw [(Name, Raw)] Raw
   deriving Show
 
 -- core syntax
@@ -585,6 +596,9 @@ infer cxt = \case
     (u, uty) <- infer (define x vt va cxt) u  
     pure (Let x a t u, uty)
 
+  RData x params ty constrs u ->
+    report cxt "TODO."
+
 
   RU {} -> report cxt "Can't infer type for universe"
   RPi {} -> report cxt "Can't infer type for product type"
@@ -663,7 +677,7 @@ prettyTy = goTy where
 
     Unit -> ("1"++)
 
-    Tensor a b -> par p appp $ goTy atomp ns a . (" ⊗ "++) . goTy atomp ns b
+    Tensor a b -> par p appp $ goTy atomp ns a . (" × "++) . goTy atomp ns b
 
     Sigma "_" a b -> par p pip $ goTy appp ns a . (" × "++) . goTy pip ("_":ns) b
 
@@ -712,7 +726,7 @@ pArrow   = symbol "→" <|> symbol "->"
 decimal  = lexeme L.decimal
 
 keyword :: String -> Bool
-keyword x = x == "let" || x == "λ" || x == "U" 
+keyword x = x == "let" || x == "λ" || x == "U" || x == "data" || x == "where"
 
 pIdent :: Parser Name
 pIdent = try $ do
@@ -732,6 +746,24 @@ pAtom =
         <|> (RU <$> (pKeyword "U" *> decimal))
       )
   <|> parens pRaw
+
+pTele :: Parser [(Name, Raw)]
+pTele = concat <$> many (parens ((\xs a -> map (\x -> (x, a)) xs) <$> some pBinder <*> (symbol ":" *> pRaw)))
+
+pData :: Parser Raw
+pData = do
+  pKeyword "data"
+  x <- pBinder
+  params <- pTele
+  symbol ":"
+  ty <- pRaw
+  pKeyword "where"
+  char '{'
+  constrs <- sepEndBy ((,) <$> pBinder <*> (symbol ":" *> pRaw)) (char ';')
+  char '}'
+  char ';'
+  u <- pRaw
+  pure $ RData x params ty constrs u
 
 pBinder = pIdent <|> symbol "_"
 
@@ -768,7 +800,7 @@ pLet = do
   u <- pRaw
   pure $ RLet x a t u
 
-pRaw = withPos (pLam <|> pLet <|> try pPi <|> funOrSpine)
+pRaw = withPos (pLam <|> pLet <|> pData <|> try pPi <|> funOrSpine)
 pSrc = ws *> pRaw <* eof
 
 parseString :: String -> IO Raw
