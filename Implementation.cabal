@@ -1,11 +1,5 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
---
--- see: https://github.com/sol/hpack
---
--- hash: 6e3542288d5db17383430be188e6620ad82ef9dbe372e2cd30c4b70ae73ef83e
-
 name:           implem-fuss-free
 version:        0.1.0.0
 build-type:     Simple

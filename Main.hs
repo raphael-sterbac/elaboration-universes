@@ -58,14 +58,15 @@ newtype Ix  = Ix  Int deriving (Eq, Show, Num) via Int
 -- De Bruijn level.
 newtype Lvl = Lvl Int deriving (Eq, Show, Num) via Int
 
-
 type Name = String
+
+type ULvl = Int
 
 data Raw
   = RVar Name              -- x
   | RLam Name Raw          -- \x. t
   | RApp Raw Raw           -- t u
-  | RU Int                 -- U i
+  | RU ULvl                -- U i
   | RPi Name Raw Raw       -- (x : A) -> B
   | RLet Name Raw Raw Raw  -- let x : A = t in u
   | RSrcPos SourcePos Raw  -- source position for error reporting
@@ -76,8 +77,8 @@ data Raw
 
 data Ty
   = Pi Name ~Ty Ty
-    | U Int 
-    | Decode Int Tm
+    | U ULvl 
+    | Decode ULvl Tm
 
 data Tm
   = Var Ix
@@ -94,12 +95,12 @@ type Env = [VTm]
 data VTy
   = VPi Name ~VTy (VTm -> VTy)
     | VU Int 
-    | VDecode Int VTm
+    | VDecode ULvl VTm
 
 data VTm
   = VVar Lvl
   | VApp VTm ~VTm
-  | VCode Int VTy
+  | VCode ULvl VTy
   | VLam Name (VTm -> VTm)
 
 --------------------------------------------------------------------------------
@@ -186,23 +187,23 @@ convTy l t u = case (t, u) of
 -- type of every variable in scope
 type Types = [(Name, VTy)]
 
--- Elaboration context.
+-- Elaboration context
 data Cxt = Cxt {env :: Env, types :: Types, lvl :: Lvl, pos :: SourcePos}
 
 emptyCxt :: SourcePos -> Cxt
 emptyCxt = Cxt [] [] 0
 
--- Extend Cxt with a bound variable.
+-- Extend Cxt with a bound variable
 bind :: Name -> VTy -> Cxt -> Cxt
 bind x ~a (Cxt env types l pos) =
   Cxt (VVar l:env) ((x, a):types) (l + 1) pos
 
--- Extend Cxt with a definition.
+-- Extend Cxt with a definition
 define :: Name -> VTm -> VTy -> Cxt -> Cxt
 define x ~t ~a (Cxt env types l pos) =
   Cxt (t:env) ((x, a):types) (l + 1) pos
 
--- Typechecking monad. We annotate the error with the current source position.
+-- Typechecking monad, We annotate the error with the current source position
 type M = Either (String, SourcePos)
 
 
@@ -237,6 +238,10 @@ showVTy cxt v = showTy cxt $ quoteTy (lvl cxt) v
 
 --------------------------------------------------------------------------------
 
+vApp :: VTm -> VTm -> VTm
+vApp (VLam _ f) v = f v
+vApp f          v = VApp f v
+
 inferU :: Cxt -> Raw -> M (Tm, Int)
 inferU cxt t = do
   (t, a) <- infer cxt t
@@ -256,26 +261,19 @@ coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
     
     u_x <- coe cxt' l' a2 a1 (Var (Ix 0))
 
-    let env' = env cxt'
-    let vu_x = evalTm env' u_x
-    
+    let vu_x = evalTm (env cxt') u_x
     let vm = evalTm (env cxt) m
-    let vApp = case vm of
-                VLam _ f -> f vu_x
-                _        -> VApp vm vu_x
-                
-    let m_u_x = quoteTm l' vApp
+    let m_u_x = quoteTm l' (vApp vm vu_x)
     
     n_x <- coe cxt' l' (b1 vu_x) (b2 (VVar l)) m_u_x
     
     pure $ Lam n2 n_x
 
   _ -> 
-    if convTy l sourceTy targetTy then
-      pure m 
+    if convTy l sourceTy targetTy then pure m 
     else report cxt "Error: Invalid coercion"
 
-checkTy :: Cxt -> Raw -> Maybe Int -> M Ty
+checkTy :: Cxt -> Raw -> Maybe ULvl -> M Ty
 checkTy cxt t size = case t of
 
   RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
@@ -300,8 +298,6 @@ checkTy cxt t size = case t of
         Just j | i <= j -> pure (Decode i t)
         Just k -> report cxt ("Size issue: got a code at level " ++ show i ++ ", but expected  " ++ show k)
       _    -> report cxt "Elaboration error: Expected a code"
-    
-
 
 check :: Cxt -> Raw -> VTy -> M Tm
 check cxt t a = case (t, a) of

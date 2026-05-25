@@ -109,6 +109,11 @@ data Ty
     | Ext Desc Ty
     | Mu Desc
     | Square Desc ~Ty Tm
+    | Label Name
+    -- Enumerations
+    | EnumU
+    | EnumT Tm
+    | SmallPiE Tm Tm
 
 data Tm
   = Var Ix
@@ -124,6 +129,12 @@ data Tm
   | SquareMap Desc Tm Tm
   | ExtMap Desc Tm Tm
   | Elim Desc Tm Tm Tm
+  -- Enumerations
+  | NilE
+  | ConsE Name Tm
+  | ZeroE 
+  | SuccE Tm
+  | Switch Tm Tm
 
 
 -- values
@@ -141,6 +152,10 @@ data VTy
     | VTensor VTy VTy
     | VSquare VDesc (VTm -> VTy) VTm
     | VMu Env VDesc
+    -- Enumerations
+    | VEnumU
+    | VEnumT VTm
+    | VSmallPiE VTm VTm
     
 
 data VTm
@@ -156,6 +171,12 @@ data VTm
   | VSquareMap VDesc VTm VTm
   | VExtMap VDesc VTm VTm
   | VElim VDesc VTm VTm VTm
+    -- Enumerations
+  | VNilE
+  | VConsE Name VTm
+  | VZeroE 
+  | VSuccE VTm
+  | VSwitch VTm VTm
 
 data VDesc
   = VDescUnit
@@ -214,6 +235,20 @@ applyElim d vc vm vn = case vn of
     
   k -> VElim d vc vm k
 
+applySwitch :: VTm -> VTm -> VTm
+applySwitch vt vu = case vu of
+  VZeroE -> case vt of
+    VPair v1 _    -> v1
+    VDPair _ v1 _ -> v1
+    k       -> VSwitch k VZeroE
+    
+  VSuccE x -> case vt of
+    VPair _ v2    -> applySwitch v2 x
+    VDPair _ _ v2 -> applySwitch v2 x
+    k       -> VSwitch k (VSuccE x)
+    
+  k -> VSwitch vt k
+
 evalTm :: Env -> Tm -> VTm
 evalTm env = \case
   Var (Ix x)    -> env !! x
@@ -247,6 +282,16 @@ evalTm env = \case
         vn = evalTm env n
         vd = evalDesc env d
     in applyElim vd vc vm vn
+
+  -- Enumerations
+  NilE       -> VNilE
+  ConsE n t  -> VConsE n (evalTm env t)
+  ZeroE      -> VZeroE
+  SuccE t    -> VSuccE (evalTm env t)
+  Switch t u -> 
+    let vt = evalTm env t
+        vu = evalTm env u
+    in applySwitch vt vu
 
 applySquare :: Env -> Desc -> (VTm -> VTy) -> VTm -> VTy
 applySquare env d p vm = case d of
@@ -292,6 +337,11 @@ evalTy env = \case
     in applySquare env d vp vm
 
   Mu d -> VMu env (evalDesc env d)
+  
+  -- Enumerations
+  EnumU        -> VEnumU
+  EnumT t      -> VEnumT (evalTm env t)
+  SmallPiE t u -> VSmallPiE (evalTm env t) (evalTm env u)
 
 evalDesc :: Env -> Desc -> VDesc
 evalDesc env = \case
