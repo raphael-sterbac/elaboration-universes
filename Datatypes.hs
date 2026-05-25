@@ -291,7 +291,7 @@ evalTm env = \case
         vd = evalDesc env d
     in applyElim vd vc vm vn
 
-  DReturn d -> VDreturn evalDesc d
+  DReturn d -> VDReturn (evalDesc env d)
 
   -- Enumerations
   NilE       -> VNilE
@@ -428,7 +428,7 @@ quoteDesc l = \case
   VDescTensor d1 d2 -> DescTensor (quoteDesc l d1) (quoteDesc l d2)
   VDescSum n a d -> DescSum n (quoteTy l a) (quoteDesc (l + 1) (d (VVar l)))
   VDescProd n a d -> DescProd n (quoteTy l a) (quoteDesc (l + 1) (d (VVar l)))
-  VDescCall l t -> DescCall l (quoteTm l t)
+  VDescCall lbl t -> DescCall lbl (quoteTm l t)
 
 nf :: Env -> Tm -> Tm
 nf env t = quoteTm (Lvl (length env)) (evalTm env t)
@@ -532,6 +532,7 @@ report cxt msg = Left (msg, pos cxt)
 
 deriving instance Show Tm
 deriving instance Show Ty
+deriving instance Show Label
 deriving instance Show Desc
 
 showTm :: Cxt -> Tm -> String
@@ -776,7 +777,7 @@ prettyTy = goTy where
 
     Square d pr m -> par p appp $ ("◻ "++) . prettyDesc atomp ns d . (' ':) . goTy atomp ("_":ns) pr . (' ':) . prettyTm atomp ns m
 
-    DLabel n -> (n++)
+    DLabel (Data n _) -> (n++)
 
     EnumU -> ("EnumU "++)
 
@@ -797,6 +798,8 @@ prettyDesc = goDesc where
     DescSum (fresh ns -> x) a d -> par p pip $ ("Σ "++) . showParen True ((x++) . (" : "++) . prettyTy letp ns a) . (". "++) . goDesc pip (x:ns) d
 
     DescProd (fresh ns -> x) a d -> par p pip $ ("Π "++) . showParen True ((x++) . (" : "++) . prettyTy letp ns a) . (". "++) . goDesc pip (x:ns) d
+
+    DescCall (Data n _) t -> par p appp $ (n++) . (' ':) . prettyTm atomp ns t
 
 -- instance Show Tm where showsPrec p = prettyTm p []
 
