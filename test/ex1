@@ -1,0 +1,28 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data List (A : U 0) : U 0 where {
+  nil : List A ;
+  cons : A -> List A -> List A
+} ;
+
+let two : Nat = succ (succ zero) ;
+let l : List Nat = cons Nat two (cons Nat zero (nil Nat)) ;
+
+let length : List Nat -> Nat = \l.
+  elimList Nat (\_. Nat)
+    < \p ih. zero ,
+    < \p ih. succ (fst ih) ,
+    * > >
+    l ;
+  
+let add : Nat -> Nat -> Nat = \a b.
+  elimNat (\_. Nat)
+    < \p ih. b ,
+    < \p ih. succ (fst ih) ,
+    * > >
+    a ;
+
+add (length l) (length l)

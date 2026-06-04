@@ -1,0 +1,33 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data Bool : U 0 where {
+  true : Bool ;
+  false : Bool
+} ;
+
+data List (A : U 0) : U 0 where {
+  nil : List A ;
+  cons : A -> List A -> List A
+} ;
+
+let isZero : Nat -> Bool = \n.
+  elimNat (\_. Bool)
+    < \p ihs. true ,
+    < \p ihs. false ,
+    * > >
+    n ;
+
+let mapIsZero : List Nat -> List Bool = \l.
+  elimList Nat (\_. List Bool)
+    < \p ihs. nil Bool ,
+    < \p ihs. cons Bool (isZero (fst p)) (fst ihs) ,
+    * > >
+    l ;
+
+let l : List Nat = cons Nat zero (cons Nat (succ zero) (cons Nat zero (nil Nat))) ;
+
+-- Expected output: cons Bool true (cons Bool false (cons Bool true (nil Bool)))
+mapIsZero l

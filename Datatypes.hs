@@ -8,7 +8,7 @@ import Data.Char
 import Data.Void
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
-import System.Environment ()
+import System.Environment (getArgs)
 import System.Exit
 import Text.Megaparsec
 import Text.Printf
@@ -16,113 +16,13 @@ import Text.Printf
 import qualified Text.Megaparsec.Char       as C
 import qualified Text.Megaparsec.Char.Lexer as L
 
--- import Debug.Trace
-
--- examples
---------------------------------------------------------------------------------
-
-ex0 = main' "nf" $ unlines [
-  "data Nat : U 0 where {",
-  "  zero : Nat ;",
-  "  succ : Nat -> Nat",
-  "} ;",
-
-  "data List (A : U 0) : U 0 where {",
-  "  nil : List A ;",
-  "  cons : A -> List A -> List A",
-  "} ;",
-
-  "let two : Nat = succ (succ zero) ;",
-  "let l : List Nat = cons Nat two (cons Nat two (cons Nat zero (nil Nat))) ;",
-
-  "let length : List Nat -> Nat = \\l.",
-  "  elimList Nat (\\_. Nat)",
-  "    < \\p ih. zero ,",
-  "    < \\p ih. succ (fst ih) ,",
-  "    * > >",
-  "    l ;",
-  
-  "let add : Nat -> Nat -> Nat = \\a b.",
-  "  elimNat (\\_. Nat)",
-  "    < \\p ih. b ,",
-  "    < \\p ih. succ (fst ih) ,",
-  "    * > >",
-  "    a ;",
-
-  "add (length l) (length l)"
-  ]
-
-ex1 = main' "nf" $ unlines [
-  "data Nat : U 0 where {",
-  "  zero : Nat ;",
-  "  succ : Nat -> Nat",
-  "} ;",
-
-  "data Tree (A : U 0) : U 0 where {",
-  "  leaf : Tree A ;",
-  "  node : A -> Tree A -> Tree A -> Tree A",
-  "} ;",
-
-  "let add : Nat -> Nat -> Nat = \\a b.",
-  "  elimNat (\\_. Nat)",
-  "    < \\p ih. b ,",
-  "    < \\p ih. succ (fst ih) ,",
-  "    * > >",
-  "    a ;",
-
-  "let treeSize : (A : U 0) -> Tree A -> Nat = \\A t.",
-  "  elimTree A (\\_. Nat)",
-  "    < \\p ih. succ zero ,",
-  "    < \\p ih. ",
-  "        let ihLeft : Nat = fst ih ;",
-  "        let ihRight : Nat = fst (snd ih) ;",
-  "        succ (add ihLeft ihRight) ,",
-  "    * > >",
-  "    t ;",
-
-  "let myTree : Tree Nat = ",
-  "  node Nat zero ",
-  "    (leaf Nat) ",
-  "    (node Nat zero (leaf Nat) (leaf Nat)) ;",
-
-  "treeSize Nat myTree"
-  ]
-
-ex2 = main' "nf" $ unlines [
-  "data Nat : U 0 where {",
-  "  zero : Nat ;",
-  "  succ : Nat -> Nat",
-  "} ;",
-
-  "let add : Nat -> Nat -> Nat = \\a b.",
-  "  elimNat (\\_. Nat)",
-  "    < \\p ihs. b ,",
-  "    < \\p ihs. succ (fst ihs) ,",
-  "    * > >",
-  "    a ;",
-
-  "let fibIter : Nat -> (Nat -> Nat -> Nat) = \\n.",
-  "  elimNat (\\_. Nat -> Nat -> Nat)",
-  "    < \\p ihs. \\a b. a ,",
-  "    < \\p ihs. \\a b. (fst ihs) b (add a b) ,",
-  "    * > >",
-  "    n ;",
-
-  "let fib : Nat -> Nat = \\n.",
-  "  fibIter n zero (succ zero) ;",
-
-  "let n : Nat = (succ (succ (succ (succ (succ (succ (succ (succ zero)))))))) ;",
-  "fib n"
-  ]
-
-
 -- syntax
 --------------------------------------------------------------------------------
 
--- | De Bruijn index.
+-- De Bruijn index.
 newtype Ix  = Ix  Int deriving (Eq, Show, Num) via Int
 
--- | De Bruijn level.
+-- De Bruijn level.
 newtype Lvl = Lvl Int deriving (Eq, Show, Num) via Int
 
 
@@ -831,7 +731,7 @@ elabElimTy :: Int -> Name -> [(Name, Raw)] -> [Ty] -> Lvl -> VTm -> VTm -> Ty
 elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm =
   let n = length params
       
-      -- We recover the 
+      -- Recover the datatype with by applying it to the parameters
       vParams = [VVar (Lvl i) | i <- [l_p - n .. l_p - 1]]
       vDatatypeCode = foldl vApp (VVar (Lvl (l_p - n - 1))) vParams
       vDatatype = VDecode uLevel vDatatypeCode
@@ -1260,43 +1160,42 @@ displayError file (msg, SourcePos path (unPos -> linum) (unPos -> colnum)) = do
   printf "%s | %s\n" lnum (lines file !! (linum - 1))
   printf "%s | %s\n" lpad (replicate (colnum - 1) ' ' ++ "^")
   printf "%s\n" msg
-
+helpMsg :: String
 helpMsg = unlines [
-  "usage: elabzoo-univ-lifts [--help|nf|type]",
-  "  --help         : display this message",
-  "  nf             : read & elaborate expression from stdin, print its normal form and type",
-  "  elab           : read & elaborate expression from stdin, print output",
-  "  elab-no-delift : read & elaborate expression from stdin, print output",
-  "                   without removing intermediate lifts and explicit weakenings",
-  "  type           : read & elaborate expression from stdin, print its type"]
-
-mainWith :: IO [String] -> IO (Raw, String) -> IO ()
-mainWith getOpt getRaw = do
-  getOpt >>= \case
-    ["--help"] -> putStrLn helpMsg
-    ["nf"]   -> do
-      (t, file) <- getRaw
-      case infer (emptyCxt (initialPos file)) t of
-        Left err -> displayError file err
-        Right (t, a) -> do
-          putStrLn $ showTm0 $ nf [] t
-          putStrLn "  :"
-          putStrLn $ showTy0 $ quoteTy 0 a
-    ["elab"] -> do
-      (t, file) <- getRaw
-      case infer (emptyCxt (initialPos file)) t of
-        Left err     -> displayError file err
-        Right (t, a) -> putStrLn $ showTm0 $ t
-    ["type"] -> do
-      (t, file) <- getRaw
-      case infer (emptyCxt (initialPos file)) t of
-        Left err     -> displayError file err
-        Right (t, a) -> putStrLn $ showTy0 $ quoteTy 0 a
-    _ -> putStrLn helpMsg
+  "usage: elabzoo-univ-lifts <mode> <filepath>",
+  "modes:",
+  "  nf <file>      : read & elaborate expression from file, print its normal form and type",
+  "  elab <file>    : read & elaborate expression from file, print output",
+  "  type <file>    : read & elaborate expression from file, print its type",
+  "",
+  "example:",
+  "  runhaskell Datatypes.hs nf test/ex1.txt"
+  ]
 
 main :: IO ()
-main = ex2
-
--- | Run main with inputs as function arguments.
-main' :: String -> String -> IO ()
-main' mode src = mainWith (pure [mode]) ((,src) <$> parseString src)
+main = do
+  args <- getArgs
+  case args of
+    ["--help"] -> putStrLn helpMsg
+    
+    [mode, filepath] | mode `elem` ["nf", "elab", "type"] -> do
+      src <- readFile filepath
+      
+      case parse pSrc filepath src of
+        Left e -> putStrLn $ errorBundlePretty e
+        Right tm -> do
+          
+          let cxt = emptyCxt (initialPos filepath)
+          case infer cxt tm of
+            Left err -> displayError src err
+            Right (t, a) -> case mode of
+              "nf" -> do
+                putStrLn $ showTm0 $ nf [] t
+                putStrLn "  :"
+                putStrLn $ showTy0 $ quoteTy 0 a
+              "elab" -> putStrLn $ showTm0 $ t
+              "type" -> putStrLn $ showTy0 $ quoteTy 0 a
+              _      -> pure ()
+              
+    -- Catch invalid arguments and print help
+    _ -> putStrLn helpMsg

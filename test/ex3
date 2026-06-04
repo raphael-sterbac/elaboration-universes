@@ -1,0 +1,25 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data List (A : U 0) : U 0 where {
+  nil : List A ;
+  cons : A -> List A -> List A
+} ;
+
+let append : List Nat -> List Nat -> List Nat = \l1 l2.
+  elimList Nat (\_. List Nat)
+    < \p ihs. l2 ,
+    < \p ihs. cons Nat (fst p) (fst ihs) ,
+    * > >
+    l1 ;
+
+let one : Nat = succ zero ;
+let two : Nat = succ one ;
+let three : Nat = succ two ;
+
+let list1 : List Nat = cons Nat one (cons Nat two (nil Nat)) ;
+let list2 : List Nat = cons Nat three (cons Nat one (nil Nat)) ;
+
+append list1 list2

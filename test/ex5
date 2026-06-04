@@ -1,0 +1,31 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data Tree (A : U 0) : U 0 where {
+  leaf : Tree A ;
+  node : A -> Tree A -> Tree A -> Tree A
+} ;
+
+let mirror : Tree Nat -> Tree Nat = \t.
+  elimTree Nat (\_. Tree Nat)
+    < \p ihs. leaf Nat ,
+    < \p ihs. 
+        let val : Nat = fst p ;
+        let ihLeft : Tree Nat = fst ihs ;
+        let ihRight : Tree Nat = fst (snd ihs) ;
+        node Nat val ihRight ihLeft ,
+    * > >
+    t ;
+
+let one : Nat = succ zero ;
+let two : Nat = succ (succ zero) ;
+let root : Nat = zero ;
+
+let myTree : Tree Nat = 
+  node Nat root 
+    (node Nat one (leaf Nat) (leaf Nat)) 
+    (node Nat two (leaf Nat) (leaf Nat)) ;
+
+mirror myTree

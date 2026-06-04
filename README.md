@@ -15,5 +15,11 @@ The file `Datatypes.hs` adds datatypes in the type theory, following Dagand's th
 To compile the project, run the following command :
 
 ```
-cabal v2-run implem-fuss-free
+cabal build
+```
+
+You can then run several tests provided in the directory `test/` using the following command:
+
+```
+cabal exec implem-fuss-free -- nf test/[choose a test]
 ```

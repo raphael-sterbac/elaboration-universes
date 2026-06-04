@@ -1,0 +1,24 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+let add : Nat -> Nat -> Nat = \a b.
+  elimNat (\_. Nat)
+    < \p ihs. b ,
+    < \p ihs. succ (fst ihs) ,
+    * > >
+    a ;
+
+let fibIter : Nat -> (Nat -> Nat -> Nat) = \n.
+  elimNat (\_. Nat -> Nat -> Nat)
+    < \p ihs. \a b. a ,
+    < \p ihs. \a b. (fst ihs) b (add a b) ,
+    * > >
+    n ;
+
+let fib : Nat -> Nat = \n.
+  fibIter n zero (succ zero) ;
+
+let n : Nat = (succ (succ (succ (succ (succ (succ (succ (succ zero)))))))) ;
+fib n

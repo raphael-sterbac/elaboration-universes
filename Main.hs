@@ -208,7 +208,6 @@ type M = Either (String, SourcePos)
 
 
 -- Printing and error reporting
-
 report :: Cxt -> String -> M a
 report cxt msg = Left (msg, pos cxt)
 
