@@ -8,7 +8,7 @@ to simplify the implementation, first described [here](https://www.jonmsterling.
 The main file is `Main.hs`, and contains the implementation of a minimal type theory, with no fancy features to emphasize
 the simplicity of the approach. 
 
-The file `Unification.hs` adds holes in the type theory, and implements unification.
+The file `Datatypes.hs` adds datatypes in the type theory, following Dagand's thesis *Cosmology of datatypes* and adapting it to the new system for universes.
 
 # Compiling the project
 

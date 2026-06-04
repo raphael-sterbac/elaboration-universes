@@ -33,7 +33,7 @@ ex0 = main' "nf" $ unlines [
   "} ;",
 
   "let two : Nat = succ (succ zero) ;",
-  "let l : List Nat = cons Nat two (cons Nat zero (nil Nat)) ;",
+  "let l : List Nat = cons Nat two (cons Nat two (cons Nat zero (nil Nat))) ;",
 
   "let length : List Nat -> Nat = \\l.",
   "  elimList Nat (\\_. Nat)",
@@ -86,6 +86,33 @@ ex1 = main' "nf" $ unlines [
   "    (node Nat zero (leaf Nat) (leaf Nat)) ;",
 
   "treeSize Nat myTree"
+  ]
+
+ex2 = main' "nf" $ unlines [
+  "data Nat : U 0 where {",
+  "  zero : Nat ;",
+  "  succ : Nat -> Nat",
+  "} ;",
+
+  "let add : Nat -> Nat -> Nat = \\a b.",
+  "  elimNat (\\_. Nat)",
+  "    < \\p ihs. b ,",
+  "    < \\p ihs. succ (fst ihs) ,",
+  "    * > >",
+  "    a ;",
+
+  "let fibIter : Nat -> (Nat -> Nat -> Nat) = \\n.",
+  "  elimNat (\\_. Nat -> Nat -> Nat)",
+  "    < \\p ihs. \\a b. a ,",
+  "    < \\p ihs. \\a b. (fst ihs) b (add a b) ,",
+  "    * > >",
+  "    n ;",
+
+  "let fib : Nat -> Nat = \\n.",
+  "  fibIter n zero (succ zero) ;",
+
+  "let n : Nat = (succ (succ (succ (succ (succ (succ (succ (succ zero)))))))) ;",
+  "fib n"
   ]
 
 
@@ -142,7 +169,7 @@ data Ty
     | Ext Desc Ty
     | Mu Desc
     | Square Desc ~Ty Tm
-    | DLabel Label
+    | DLabel Label Ty
     -- Enumerations
     | EnumU
     | EnumT Tm
@@ -159,6 +186,7 @@ data Tm
   | Fst Tm
   | Snd Tm
   | One
+  | ConLabel Name Tm
   -- Descriptions 
   | In Tm
   | SquareMap Desc Tm Tm
@@ -189,7 +217,7 @@ data VTy
     | VTensor VTy VTy
     | VSquare VDesc (VTm -> VTy) VTm
     | VMu Env VDesc
-    | VDLabel VLabel
+    | VDLabel VLabel VTy
     | VExt VDesc VTy
     -- Enumerations
     | VEnumU
@@ -207,6 +235,7 @@ data VTm
   | VFst VTm
   | VSnd VTm
   | VOne
+  | VConLabel Name VTm
   -- Descriptions
   | VIn VTm
   | VSquareMap VDesc VTm VTm
@@ -260,13 +289,15 @@ applySwitch vt vu = case vu of
   k -> VSwitch vt k
 
 applyElim :: VDesc -> VTm -> VTm -> VTm -> VTm
-applyElim d vc vm vn = case vn of
-  VIn x -> 
-    let recElim = VLam "_" \v -> applyElim d vc vm v
-        ihs = applySquareMap d recElim x
-    in vApp (vApp vm x) ihs
-    
-  k -> VElim d vc vm k
+applyElim d vc vm vn = 
+  let strip (VConLabel _ t) = strip t
+      strip t = t
+  in case strip vn of
+    VIn x -> 
+      let recElim = VLam "_" \v -> applyElim d vc vm v
+          ihs = applySquareMap d recElim x
+      in vApp (vApp vm x) ihs
+    _ -> VElim d vc vm vn
 
 applyFst :: VTm -> VTm
 applyFst (VPair t _) = t
@@ -290,6 +321,7 @@ evalTm env = \case
   In t          -> VIn (evalTm env t)
   Fst t -> applyFst (evalTm env t)
   Snd t -> applySnd (evalTm env t)
+  ConLabel n t -> VConLabel n (evalTm env t)
   
 
   -- Case of a Coding
@@ -353,7 +385,7 @@ evalTy env = \case
   Sigma x a b   -> VSigma x (evalTy env a) \v -> evalTy (v:env) b
   Tensor a b    -> VTensor (evalTy env a) (evalTy env b)
   Unit          -> VUnit
-  DLabel (Data n ts) -> VDLabel (VData n (map (evalTm env) ts))
+  DLabel (Data n ts) ty -> VDLabel (VData n (map (evalTm env) ts)) (evalTy env ty)
 
   -- Case of a Decoding
   Decode i t    -> case evalTm env t of
@@ -407,6 +439,7 @@ quoteTm l = \case
   VOne -> One
   VFst t -> Fst (quoteTm l t)
   VSnd t -> Snd (quoteTm l t)
+  VConLabel n t -> ConLabel n (quoteTm l t)
 
   -- Case of a Coding
   VCode i a   -> Code i (quoteTy l a)
@@ -432,8 +465,8 @@ quoteTy l = \case
   VSigma x a b -> Sigma x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
   VUnit -> Unit
   VTensor a b -> Tensor (quoteTy l a) (quoteTy l b)
-  VDLabel (VData n ts) -> DLabel (Data n (map (quoteTm l) ts))
-
+  VDLabel (VData n ts) ty -> DLabel (Data n (map (quoteTm l) ts)) (quoteTy l ty)
+  
   -- Case of a Decoding
   VDecode i t -> Decode i (quoteTm l t)
 
@@ -460,7 +493,10 @@ nf :: Env -> Tm -> Tm
 nf env t = quoteTm (Lvl (length env)) (evalTm env t)
 
 convTm :: Lvl -> VTm -> VTm -> Bool
-convTm l t u = case (t, u) of
+convTm l t u =
+  let strip (VConLabel _ tm) = strip tm
+      strip tm = tm
+  in case (strip t, strip u) of
   (VLam _ t, VLam _ t') -> convTm (l + 1) (t (VVar l)) (t' (VVar l))
 
   (VLam _ t, u) -> convTm (l + 1) (t (VVar l)) (VApp u (VVar l))
@@ -494,7 +530,10 @@ convTm l t u = case (t, u) of
   _ -> False
 
 convTy :: Lvl -> VTy -> VTy -> Bool
-convTy l t u = case (t, u) of
+convTy l t u =
+  let strip (VDLabel _ ty) = strip ty
+      strip ty = ty
+  in case (strip t, strip u) of
   (VU i, VU i') -> i == i'
   (VUnit, VUnit) -> True
   (VTensor a b, VTensor a' b') -> convTy l a a' && convTy l b b'
@@ -507,8 +546,6 @@ convTy l t u = case (t, u) of
   -- Descriptions
   (VSquare d p m, VSquare d' p' m') -> convDesc l d d'  && convTy (l + 1) (p (VVar l)) (p' (VVar l))  && convTm l m m'
   (VMu _ d, VMu _ d') -> convDesc l d d'
-  (VDLabel (VData n ts), VDLabel (VData n' ts')) -> 
-      n == n' && length ts == length ts' && and (zipWith (convTm l) ts ts')
   (VExt d x, VExt d' x') -> convDesc l d d' && convTy l x x'
 
   -- Enumerations
@@ -729,7 +766,7 @@ buildParamCxt c ((p, pTy):ps) = do
 elabTags :: [(Name, Raw)] -> Tm
 elabTags = foldr (\(cName, _) acc -> ConsE cName acc) NilE
 
--- Rule (d) : Elaborates the description associated to a raw term
+-- Elaborates the description associated to a raw term (rule d)
 elabConstrDesc :: Name -> Cxt -> Raw -> M Desc
 elabConstrDesc dName c = \case
   RSrcPos pos t -> elabConstrDesc dName (c {pos = pos}) t 
@@ -752,8 +789,8 @@ elabFullDesc dName numParams tagTy tuple =
       descCall = DescCall (Data dName paramVars) switchTm
   in DescSum "c" tagTy descCall
 
-elabConstrTm :: Name -> [(Name, Raw)] -> Raw -> Tm -> Tm
-elabConstrTm dName params cTyRaw cTag =
+elabConstrTm :: Name -> Name -> [(Name, Raw)] -> Raw -> Tm -> Tm
+elabConstrTm dName cName params cTyRaw cTag =
   let getArgs (RSrcPos _ t) = getArgs t
       getArgs (RPi y _ b) = y : getArgs b
       getArgs _ = []
@@ -770,7 +807,7 @@ elabConstrTm dName params cTyRaw cTag =
       buildPayload _ _ = One
       
       payload = buildPayload cTyRaw (numArgs - 1)
-      inner = In (DPair "c" cTag payload)
+      inner = ConLabel cName (In (DPair "c" cTag payload))
       body = foldr Lam inner args
   in foldr (\(p, _) acc -> Lam p acc) body params
 
@@ -780,8 +817,8 @@ elabConstrs dName params c (((cName, cTyRaw), cTag) : rest) = do
   let fullTyRaw = foldr (\(p, pTy) acc -> RPi p pTy acc) cTyRaw params
   
   cTyTm <- checkTy c fullTyRaw Nothing
-  let term = elabConstrTm dName params cTyRaw cTag
-  
+  let term = elabConstrTm dName cName params cTyRaw cTag  
+
   let vcTy = evalTy (env c) cTyTm
   let vcTerm = evalTm (env c) term
   
@@ -904,8 +941,12 @@ infer cxt = \case
     -- TODO : universe level, here we take the code of (Mu descSum),
     -- Maybe we don't really need this if we would want to define something like D (params : Tp) : Tp
     -- This would involve making the sort Tp representable such that we are able to bind it
-    let muTm = Code uLevel (Mu descSum) 
-    let term_D = foldr (\(p, _) acc -> Lam p acc) muTm params
+    let muTy = Mu descSum 
+    let paramVars = [Var (Ix i) | i <- [n - 1, n - 2 .. 0]]
+    let dLabelTy = DLabel (Data x paramVars) muTy 
+    
+    let dCode = Code uLevel dLabelTy
+    let term_D = foldr (\(p, _) acc -> Lam p acc) dCode params
     
     let tags = iterate SuccE ZeroE
     let vTermD = evalTm (env cxt) term_D
@@ -991,6 +1032,19 @@ prettyTm = goTm where
 
     One -> ("*"++)
 
+    ConLabel cName t ->
+      let extractArgs One = []
+          extractArgs (Pair a b) = a : extractArgs b
+          extractArgs (DPair _ a b) = a : extractArgs b
+          extractArgs _ = []
+      in case t of
+        In (DPair _ _ payload) ->
+          let args = extractArgs payload
+          in if null args 
+             then (cName++)
+             else par p appp $ (cName++) . foldr (\arg acc -> (' ':) . goTm atomp ns arg . acc) id args
+        _ -> par p appp $ (cName++) . (' ':) . goTm atomp ns t
+
     In t -> par p appp $ ("in "++) . goTm atomp ns t
 
     SquareMap d f m -> par p appp $ ("map◻ "++) . prettyDesc atomp ns d . (' ':) . goTm atomp ns f . (' ':) . goTm atomp ns m
@@ -1043,7 +1097,10 @@ prettyTy = goTy where
 
     Square d pr m -> par p appp $ ("◻ "++) . prettyDesc atomp ns d . (' ':) . goTy atomp ("_":ns) pr . (' ':) . prettyTm atomp ns m
 
-    DLabel (Data n _) -> (n++)
+    DLabel (Data n ts) _ -> 
+      if null ts
+      then (n++)
+      else par p appp $ (n++) . foldr (\t acc -> (' ':) . prettyTm atomp ns t . acc) id ts
 
     EnumU -> ("EnumU "++)
 
@@ -1238,7 +1295,7 @@ mainWith getOpt getRaw = do
     _ -> putStrLn helpMsg
 
 main :: IO ()
-main = ex1
+main = ex2
 
 -- | Run main with inputs as function arguments.
 main' :: String -> String -> IO ()
