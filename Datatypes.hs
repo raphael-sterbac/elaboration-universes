@@ -22,10 +22,9 @@ import qualified Text.Megaparsec.Char.Lexer as L
 --------------------------------------------------------------------------------
 
 ex0 = main' "nf" $ unlines [
-
-  "data Bool : U 0 where {",
-  "  true : Bool ;",
-  "  false : Bool",
+  "data Nat : U 0 where {",
+  "  zero : Nat ;",
+  "  succ : Nat -> Nat",
   "} ;",
 
   "data List (A : U 0) : U 0 where {",
@@ -33,34 +32,60 @@ ex0 = main' "nf" $ unlines [
   "  cons : A -> List A -> List A",
   "} ;",
 
-  "let f : U 1 -> U 1 = \\A. A;",
-  "let g : U 0 -> U 2 = f;",
-  "let f : (A : U 0) -> A -> A = \\A x. x;",
+  "let two : Nat = succ (succ zero) ;",
+  "let l : List Nat = cons Nat two (cons Nat zero (nil Nat)) ;",
 
-  "let IdTy1    : U 2 = ((A : U 1) -> A -> A);",
-  "let ConstTy0 : U 1 = ((A B : U 0) -> A -> B -> A);",
-  "let id1 : IdTy1 = \\A x. x;",
-  "let const0 : ConstTy0 = \\A B x y. x;",
-  "let foo : ConstTy0 = id1 ConstTy0 const0;",
+  "let length : List Nat -> Nat = \\l.",
+  "  elimList Nat (\\_. Nat)",
+  "    < \\p ih. zero ,",
+  "    < \\p ih. succ (fst ih) ,",
+  "    * > >",
+  "    l ;",
+  
+  "let add : Nat -> Nat -> Nat = \\a b.",
+  "  elimNat (\\_. Nat)",
+  "    < \\p ih. b ,",
+  "    < \\p ih. succ (fst ih) ,",
+  "    * > >",
+  "    a ;",
 
-  "let Nat  : U 1 = ((N : U 0) -> ( N -> N) -> N -> N) ;",
-  "let zero : Nat = λ N s z. z;",
-  "let one  : Nat = λ N s z. s z;",
-  "let five : Nat = \\N s z. s (s (s (s (s z)))) ;",
-  "let add  : Nat -> Nat -> Nat = \\a b N s z. a N s (b N s z) ;",
-  "let mul  : Nat -> Nat -> Nat = \\a b N s z. a N (b N s) z ;",
-  "let ten      : Nat = add five five ;",
-  "let hundred  : Nat = mul ten ten ;",
+  "add (length l) (length l)"
+  ]
 
-  "let Eq1 : (A : U 1) → A → A → U 1",
-  "    = λ A x y. ((P : A → U 0) → (P x) → (P y) );",
+ex1 = main' "nf" $ unlines [
+  "data Nat : U 0 where {",
+  "  zero : Nat ;",
+  "  succ : Nat -> Nat",
+  "} ;",
 
-  "let refl1 : (A : U 1)(x : A) → Eq1 A x x",
-  "  = λ A x P px. px;",
+  "data Tree (A : U 0) : U 0 where {",
+  "  leaf : Tree A ;",
+  "  node : A -> Tree A -> Tree A -> Tree A",
+  "} ;",
 
-  "let p1 : Eq1 Nat ten ten = refl1 Nat ten;",
-  "id1 Nat hundred"
+  "let add : Nat -> Nat -> Nat = \\a b.",
+  "  elimNat (\\_. Nat)",
+  "    < \\p ih. b ,",
+  "    < \\p ih. succ (fst ih) ,",
+  "    * > >",
+  "    a ;",
 
+  "let treeSize : (A : U 0) -> Tree A -> Nat = \\A t.",
+  "  elimTree A (\\_. Nat)",
+  "    < \\p ih. succ zero ,",
+  "    < \\p ih. ",
+  "        let ihLeft : Nat = fst ih ;",
+  "        let ihRight : Nat = fst (snd ih) ;",
+  "        succ (add ihLeft ihRight) ,",
+  "    * > >",
+  "    t ;",
+
+  "let myTree : Tree Nat = ",
+  "  node Nat zero ",
+  "    (leaf Nat) ",
+  "    (node Nat zero (leaf Nat) (leaf Nat)) ;",
+
+  "treeSize Nat myTree"
   ]
 
 
@@ -82,6 +107,10 @@ data Raw
   | RApp Raw Raw           -- t u
   | RU Int                 -- U i
   | RPi Name Raw Raw       -- (x : A) -> B
+  | RPair Raw Raw
+  | ROne
+  | RFst Raw
+  | RSnd Raw
   | RLet Name Raw Raw Raw  -- let x : A = t in u
   | RSrcPos SourcePos Raw  -- source position for error reporting
   | RData Name [(Name, Raw)] Raw (NonEmpty (Name, Raw)) Raw -- Datatype definition
@@ -127,6 +156,8 @@ data Tm
   | Let Name Ty Tm Tm
   | Pair Tm Tm
   | DPair Name Tm Tm
+  | Fst Tm
+  | Snd Tm
   | One
   -- Descriptions 
   | In Tm
@@ -146,6 +177,7 @@ data Tm
 ------------------------------------------------------------
 
 type Env = [VTm]
+data VLabel = VData Name [VTm]
 
 data VTy
   = VPi Name ~VTy (VTm -> VTy)
@@ -157,7 +189,8 @@ data VTy
     | VTensor VTy VTy
     | VSquare VDesc (VTm -> VTy) VTm
     | VMu Env VDesc
-    | VDLabel Label
+    | VDLabel VLabel
+    | VExt VDesc VTy
     -- Enumerations
     | VEnumU
     | VEnumT VTm
@@ -171,6 +204,8 @@ data VTm
   | VLam Name (VTm -> VTm)
   | VPair VTm VTm
   | VDPair Name VTm VTm
+  | VFst VTm
+  | VSnd VTm
   | VOne
   -- Descriptions
   | VIn VTm
@@ -191,7 +226,7 @@ data VDesc
   | VDescTensor VDesc VDesc
   | VDescSum Name VTy (VTm -> VDesc)
   | VDescProd Name VTy (VTm -> VDesc)
-  | VDescCall Label VTm
+  | VDescCall VLabel VTm
 
 --------------------------------------------------------------------------------
 
@@ -203,36 +238,26 @@ vApp f          v = VApp f v
 applyExtMap :: VDesc -> VTm -> VTm -> VTm
 applyExtMap d vf vm = case d of
   VDescUnit -> VOne
-  
   VDescVar -> vApp vf vm
-  
-  VDescTensor e1 e2 -> case vm of
-    VPair va vb -> VPair (applyExtMap e1 vf va) (applyExtMap e2 vf vb)
-    k     -> VExtMap d vf k
-    
-  VDescSum n a d1 -> case vm of
-    VDPair n' p1 p2 -> VDPair n' p1 (applyExtMap (d1 p1) vf p2)
-    k         -> VExtMap d vf k
-    
-  VDescProd n a d -> VLam n \v -> applyExtMap (d v) vf (vApp vm v)
+  VDescTensor e1 e2 -> VPair (applyExtMap e1 vf (applyFst vm)) (applyExtMap e2 vf (applySnd vm))
+  VDescSum n a d1 -> VDPair n (applyFst vm) (applyExtMap (d1 (applyFst vm)) vf (applySnd vm))
+  VDescProd n a d1 -> VLam n \v -> applyExtMap (d1 v) vf (vApp vm v)
+  VDescCall l k -> VExtMap d vf vm
 
 applySquareMap :: VDesc -> VTm -> VTm -> VTm
 applySquareMap d vf vm = case d of
   VDescUnit -> VOne
-  
   VDescVar -> vApp vf vm
-  
-  VDescTensor d1 d2 -> case vm of
-    VPair v1 v2 -> VPair (applySquareMap d1 vf v1) (applySquareMap d2 vf v2)
-    k     -> VSquareMap d vf k
-    
-  VDescSum n a d1 -> case vm of
-    VDPair _ p1 p2 -> applySquareMap (d1 p1) vf p2
-    k        -> VSquareMap d vf k
-    
-  VDescProd n a d1 -> case vm of
-    VLam n' f -> VLam n' \v -> applySquareMap (d1 v) vf (f v)
-    k   -> VSquareMap d vf k
+  VDescTensor d1 d2 -> VPair (applySquareMap d1 vf (applyFst vm)) (applySquareMap d2 vf (applySnd vm))
+  VDescSum n a d1 -> applySquareMap (d1 (applyFst vm)) vf (applySnd vm)
+  VDescProd n a d1 -> VLam n \v -> applySquareMap (d1 v) vf (vApp vm v)
+  VDescCall l k -> VSquareMap d vf vm
+
+applySwitch :: VTm -> VTm -> VTm
+applySwitch vt vu = case vu of
+  VZeroE -> applyFst vt
+  VSuccE x -> applySwitch (applySnd vt) x
+  k -> VSwitch vt k
 
 applyElim :: VDesc -> VTm -> VTm -> VTm -> VTm
 applyElim d vc vm vn = case vn of
@@ -243,19 +268,15 @@ applyElim d vc vm vn = case vn of
     
   k -> VElim d vc vm k
 
-applySwitch :: VTm -> VTm -> VTm
-applySwitch vt vu = case vu of
-  VZeroE -> case vt of
-    VPair v1 _    -> v1
-    VDPair _ v1 _ -> v1
-    k       -> VSwitch k VZeroE
-    
-  VSuccE x -> case vt of
-    VPair _ v2    -> applySwitch v2 x
-    VDPair _ _ v2 -> applySwitch v2 x
-    k       -> VSwitch k (VSuccE x)
-    
-  k -> VSwitch vt k
+applyFst :: VTm -> VTm
+applyFst (VPair t _) = t
+applyFst (VDPair _ t _) = t
+applyFst v = VFst v
+
+applySnd :: VTm -> VTm
+applySnd (VPair _ u) = u
+applySnd (VDPair _ _ u) = u
+applySnd v = VSnd v
 
 evalTm :: Env -> Tm -> VTm
 evalTm env = \case
@@ -267,6 +288,9 @@ evalTm env = \case
   DPair x t u   -> VDPair x (evalTm env t) (evalTm env u)
   One           -> VOne
   In t          -> VIn (evalTm env t)
+  Fst t -> applyFst (evalTm env t)
+  Snd t -> applySnd (evalTm env t)
+  
 
   -- Case of a Coding
   Code i a      -> VCode i (evalTy env a)
@@ -303,21 +327,23 @@ evalTm env = \case
         vu = evalTm env u
     in applySwitch vt vu
 
-applySquare :: Env -> Desc -> (VTm -> VTy) -> VTm -> VTy
-applySquare env d p vm = case d of
-  DescUnit -> VUnit 
+applyExt :: VDesc -> VTy -> VTy
+applyExt vd vx = case vd of
+  VDescUnit -> VUnit
+  VDescVar -> vx
+  VDescTensor d1 d2 -> VTensor (applyExt d1 vx) (applyExt d2 vx)
+  VDescSum n a d1 -> VSigma n a \v -> applyExt (d1 v) vx
+  VDescProd n a d1 -> VPi n a \v -> applyExt (d1 v) vx
+  VDescCall l k -> VExt vd vx
 
-  DescVar -> p vm
-
-  DescTensor d e -> case vm of
-    VPair a b -> VTensor (applySquare env d p a) (applySquare env e p b)
-    k     -> VSquare (VDescTensor (evalDesc env d) (evalDesc env e)) p k
-
-  DescSum n a d1 -> case vm of
-    VDPair _ p1 p2 -> applySquare env d1 p p2
-    k        -> VSquare (evalDesc env d) p k
-    
-  DescProd n a d1 ->  VPi n (evalTy env a) \v -> applySquare env d1 p (vApp vm v)
+applySquare :: VDesc -> (VTm -> VTy) -> VTm -> VTy
+applySquare vd p vm = case vd of
+  VDescUnit -> VUnit 
+  VDescVar -> p vm
+  VDescTensor d e -> VTensor (applySquare d p (applyFst vm)) (applySquare e p (applySnd vm))
+  VDescSum n a d1 -> applySquare (d1 (applyFst vm)) p (applySnd vm)
+  VDescProd n a d1 -> VPi n a \v -> applySquare (d1 v) p (vApp vm v)
+  VDescCall l k -> VSquare vd p vm
 
 
 evalTy :: Env -> Ty -> VTy
@@ -327,6 +353,7 @@ evalTy env = \case
   Sigma x a b   -> VSigma x (evalTy env a) \v -> evalTy (v:env) b
   Tensor a b    -> VTensor (evalTy env a) (evalTy env b)
   Unit          -> VUnit
+  DLabel (Data n ts) -> VDLabel (VData n (map (evalTm env) ts))
 
   -- Case of a Decoding
   Decode i t    -> case evalTm env t of
@@ -334,21 +361,17 @@ evalTy env = \case
     v                   -> VDecode i v
 
   -- Descriptions
-  Ext d x -> case d of
-    DescUnit -> VUnit 
-    DescVar -> evalTy env x
-    DescTensor d e -> VTensor (evalTy env (Ext d x)) (evalTy env (Ext e x))
-    DescSum n a d -> VSigma n (evalTy env a) \v -> evalTy (v:env) (Ext d x)
-    DescProd n a d -> VPi n (evalTy env a) \v -> evalTy (v:env) (Ext d x) 
+  Ext d x -> 
+    let vd = evalDesc env d
+        vx = evalTy env x
+    in applyExt vd vx
 
   Square d p m ->
     let vp = \v -> evalTy (v:env) p
         vm = evalTm env m
-    in applySquare env d vp vm
-
+        vd = evalDesc env d
+    in applySquare vd vp vm
   Mu d -> VMu env (evalDesc env d)
-
-  DLabel l -> VDLabel l
   
   -- Enumerations
   EnumU        -> VEnumU
@@ -366,9 +389,9 @@ evalDesc env = \case
     
   DescProd n a d   -> VDescProd n (evalTy env a) \v -> evalDesc (v:env) d
 
-  DescCall l t -> case (evalTm env t) of
+  DescCall (Data n ts) t -> case (evalTm env t) of
     VDReturn d -> d
-    k -> VDescCall l k
+    k -> VDescCall (VData n (map (evalTm env) ts)) k
 
 
 lvl2Ix :: Lvl -> Lvl -> Ix
@@ -382,6 +405,8 @@ quoteTm l = \case
   VPair t u -> Pair (quoteTm l t) (quoteTm l u)
   VDPair x t u -> DPair x (quoteTm l t) (quoteTm l u)
   VOne -> One
+  VFst t -> Fst (quoteTm l t)
+  VSnd t -> Snd (quoteTm l t)
 
   -- Case of a Coding
   VCode i a   -> Code i (quoteTy l a)
@@ -407,6 +432,7 @@ quoteTy l = \case
   VSigma x a b -> Sigma x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
   VUnit -> Unit
   VTensor a b -> Tensor (quoteTy l a) (quoteTy l b)
+  VDLabel (VData n ts) -> DLabel (Data n (map (quoteTm l) ts))
 
   -- Case of a Decoding
   VDecode i t -> Decode i (quoteTm l t)
@@ -414,7 +440,7 @@ quoteTy l = \case
   -- Descriptions
   VSquare d p m -> Square (quoteDesc l d) (quoteTy (l + 1) (p (VVar l))) (quoteTm l m)
   VMu _ d -> Mu (quoteDesc l d)
-  VDLabel l -> DLabel l
+  VExt d x -> Ext (quoteDesc l d) (quoteTy l x)
 
   -- Enumerations
   VEnumU -> EnumU
@@ -428,7 +454,7 @@ quoteDesc l = \case
   VDescTensor d1 d2 -> DescTensor (quoteDesc l d1) (quoteDesc l d2)
   VDescSum n a d -> DescSum n (quoteTy l a) (quoteDesc (l + 1) (d (VVar l)))
   VDescProd n a d -> DescProd n (quoteTy l a) (quoteDesc (l + 1) (d (VVar l)))
-  VDescCall lbl t -> DescCall lbl (quoteTm l t)
+  VDescCall (VData n ts) t -> DescCall (Data n (map (quoteTm l) ts)) (quoteTm l t)
 
 nf :: Env -> Tm -> Tm
 nf env t = quoteTm (Lvl (length env)) (evalTm env t)
@@ -446,6 +472,8 @@ convTm l t u = case (t, u) of
   (VPair t1 u1, VPair t2 u2) -> convTm l t1 t2 && convTm l u1 u2
   (VDPair _ t1 u1, VDPair _ t2 u2) -> convTm l t1 t2 && convTm l u1 u2
   (VOne, VOne) -> True
+  (VFst t, VFst u) -> convTm l t u
+  (VSnd t, VSnd u) -> convTm l t u
 
   (VCode i a, VCode j b) | i == j -> convTy l a b
 
@@ -479,7 +507,9 @@ convTy l t u = case (t, u) of
   -- Descriptions
   (VSquare d p m, VSquare d' p' m') -> convDesc l d d'  && convTy (l + 1) (p (VVar l)) (p' (VVar l))  && convTm l m m'
   (VMu _ d, VMu _ d') -> convDesc l d d'
-  (VDLabel (Data n _), VDLabel (Data n' _)) -> n == n' -- TODO : Maybe I should also try to equate the parameters here, not sure
+  (VDLabel (VData n ts), VDLabel (VData n' ts')) -> 
+      n == n' && length ts == length ts' && and (zipWith (convTm l) ts ts')
+  (VExt d x, VExt d' x') -> convDesc l d d' && convTy l x x'
 
   -- Enumerations
   (VEnumU, VEnumU) -> True
@@ -495,7 +525,8 @@ convDesc l d d' = case (d, d') of
   (VDescTensor a b, VDescTensor a' b') -> convDesc l a a' && convDesc l b b'
   (VDescSum _ a b, VDescSum _ a' b') -> convTy l a a' && convDesc (l + 1) (b (VVar l)) (b' (VVar l))
   (VDescProd _ a b, VDescProd _ a' b') -> convTy l a a' && convDesc (l + 1) (b (VVar l)) (b' (VVar l))
-  (VDescCall (Data n _) t, VDescCall (Data n' _) t') -> n == n' && convTm l t t' -- TODO : Maybe I should also try to equate the parameters here, not sure
+  (VDescCall (VData n ts) t, VDescCall (VData n' ts') t') -> 
+      n == n' && length ts == length ts' && and (zipWith (convTm l) ts ts') && convTm l t t'
   _ -> False
 
 
@@ -633,6 +664,27 @@ check cxt t a = case (t, a) of
     u <- checkTy cxt t (Just i)
     pure $ Code i u
 
+  (ROne, VUnit) -> pure One
+
+  (ROne, VSmallPiE VNilE _) -> pure One
+
+  (RPair t1 t2, VSmallPiE (VConsE _ eRest) f) -> do
+      let getTy (VCode _ ty) = ty
+          getTy v            = VDecode 0 v -- TODO : careful here with universes, this is not good
+          
+      u1 <- check cxt t1 (getTy (vApp f VZeroE))
+      u2 <- check cxt t2 (VSmallPiE eRest (VLam "c" \c -> vApp f (VSuccE c)))
+      pure (Pair u1 u2)
+  (RPair t1 t2, VSigma x a b) -> do
+      u1 <- check cxt t1 a
+      u2 <- check cxt t2 (b (evalTm (env cxt) u1))
+      pure (DPair x u1 u2)
+
+  (RPair t1 t2, VTensor a b) -> do
+      u1 <- check cxt t1 a
+      u2 <- check cxt t2 b
+      pure (Pair u1 u2)
+
   (RLet x a t u, a') -> do
     a <- checkTy cxt a Nothing
     let ~va = evalTy (env cxt) a
@@ -646,6 +698,148 @@ check cxt t a = case (t, a) of
     (m, bTy) <- infer cxt t
     coe cxt (lvl cxt) bTy a m
     
+isRec :: Name -> Raw -> Bool
+isRec d (RSrcPos _ t) = isRec d t 
+isRec d (RVar y) = y == d
+isRec d (RApp f _) = isRec d f
+isRec d _ = False
+
+-- Elaborates the type of the big Pi of the parameters, returns the type, its semantics and it's universe level
+elabDataTy :: Cxt -> [(Name, Raw)] -> Raw -> M (Ty, VTy, Int)
+elabDataTy cxt params ty = do
+  -- TODO : Can we get rid of universe level here ?
+  let tyD_raw = foldr (\(p, pTy) acc -> RPi p pTy acc) ty params
+  tyD <- checkTy cxt tyD_raw Nothing
+  let vTyD = evalTy (env cxt) tyD
+  let getUniverseLevel (U i) = i
+      getUniverseLevel (Pi _ _ b) = getUniverseLevel b
+      getUniverseLevel (Decode i _) = i
+      getUniverseLevel _ = 0
+  pure (tyD, vTyD, getUniverseLevel tyD)
+
+-- Adds all the parameters in the context
+buildParamCxt :: Cxt -> [(Name, Raw)] -> M (Cxt, [Ty])
+buildParamCxt c [] = pure (c, [])
+buildParamCxt c ((p, pTy):ps) = do
+  pTyTm <- checkTy c pTy Nothing
+  let vpTy = evalTy (env c) pTyTm
+  (c', pTyTms) <- buildParamCxt (bind p vpTy c) ps
+  pure (c', pTyTm : pTyTms)
+
+elabTags :: [(Name, Raw)] -> Tm
+elabTags = foldr (\(cName, _) acc -> ConsE cName acc) NilE
+
+-- Rule (d) : Elaborates the description associated to a raw term
+elabConstrDesc :: Name -> Cxt -> Raw -> M Desc
+elabConstrDesc dName c = \case
+  RSrcPos pos t -> elabConstrDesc dName (c {pos = pos}) t 
+  RPi y a b -> do
+    if isRec dName a then do
+      rest <- elabConstrDesc dName c b
+      pure $ DescTensor DescVar rest
+    else do
+      aTy <- checkTy c a Nothing
+      let va = evalTy (env c) aTy
+      rest <- elabConstrDesc dName (bind y va c) b
+      pure $ DescSum y aTy rest
+  _ -> pure DescUnit
+
+-- Elaborates the full description with all the parameters
+elabFullDesc :: Name -> Int -> Ty -> Tm -> Desc
+elabFullDesc dName numParams tagTy tuple =
+  let paramVars = [Var (Ix i) | i <- [numParams, numParams - 1 .. 1]]
+      switchTm = Switch tuple (Var 0)
+      descCall = DescCall (Data dName paramVars) switchTm
+  in DescSum "c" tagTy descCall
+
+elabConstrTm :: Name -> [(Name, Raw)] -> Raw -> Tm -> Tm
+elabConstrTm dName params cTyRaw cTag =
+  let getArgs (RSrcPos _ t) = getArgs t
+      getArgs (RPi y _ b) = y : getArgs b
+      getArgs _ = []
+      args = getArgs cTyRaw
+      numArgs = length args
+      
+      -- TODO : check if we can simplify this
+      buildPayload (RSrcPos _ t) idx = buildPayload t idx
+      buildPayload (RPi y a b) idx =
+        if isRec dName a then
+          Pair (Var (Ix idx)) (buildPayload b (idx - 1))
+        else
+          DPair y (Var (Ix idx)) (buildPayload b (idx - 1))
+      buildPayload _ _ = One
+      
+      payload = buildPayload cTyRaw (numArgs - 1)
+      inner = In (DPair "c" cTag payload)
+      body = foldr Lam inner args
+  in foldr (\(p, _) acc -> Lam p acc) body params
+
+elabConstrs :: Name -> [(Name, Raw)] -> Cxt -> [((Name, Raw), Tm)] -> M (Cxt, Tm -> Tm, [(Name, Ty, Tm)])
+elabConstrs dName params c [] = pure (c, id, [])
+elabConstrs dName params c (((cName, cTyRaw), cTag) : rest) = do
+  let fullTyRaw = foldr (\(p, pTy) acc -> RPi p pTy acc) cTyRaw params
+  
+  cTyTm <- checkTy c fullTyRaw Nothing
+  let term = elabConstrTm dName params cTyRaw cTag
+  
+  let vcTy = evalTy (env c) cTyTm
+  let vcTerm = evalTm (env c) term
+  
+  (cFinal, wrapLet, constrsData) <- elabConstrs dName params (define cName vcTerm vcTy c) rest
+  
+  pure (cFinal, \body -> Let cName cTyTm term (wrapLet body), (cName, cTyTm, term) : constrsData)
+
+-- Elaborates the eliminator type
+elabElimTy :: Int -> Name -> [(Name, Raw)] -> [Ty] -> Lvl -> VTm -> VTm -> Ty
+elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm =
+  let n = length params
+      
+      -- We recover the 
+      vParams = [VVar (Lvl i) | i <- [l_p - n .. l_p - 1]]
+      vDatatypeCode = foldl vApp (VVar (Lvl (l_p - n - 1))) vParams
+      vDatatype = VDecode uLevel vDatatypeCode
+      
+      -- Construct the motive 
+      vPTy = VPi "x" vDatatype (\_ -> VU uLevel)
+      
+      -- Construct eliminator
+      vElimTyBody =
+        VPi "P" vPTy $ \vP ->
+          
+          let mBody vc =
+                let vDesc_c = VDescCall (VData dName vParams) (VSwitch vTuple vc)
+                    vPayloadTy = VExt vDesc_c vDatatype
+                in VPi "payload" vPayloadTy $ \vPayload ->
+                     
+                     let vIhTy = VSquare vDesc_c (\vx -> VDecode uLevel (vApp vP vx)) vPayload
+                         vTarget = VDecode uLevel (vApp vP (VIn (VDPair "c" vc vPayload)))
+                     in VPi "ih" vIhTy $ \_ -> vTarget
+              
+              vMTy = VSmallPiE vTagTm (VLam "c" (\vc -> VCode uLevel (mBody vc)))
+          
+          in VPi "m" vMTy $ \vM ->
+               VPi "x" vDatatype $ \vX ->
+                 VDecode uLevel (vApp vP vX)
+                 
+      elimTyBodyTm = quoteTy (Lvl l_p) vElimTyBody
+      
+  in foldr (\((pName, _), pTyTm) acc -> Pi pName pTyTm acc) elimTyBodyTm (zip params pTyTms)
+
+-- Elaborates the eliminator term
+elabElimTm params (Lvl l_p) vDescSum =
+  let 
+      vElimTmBody =
+        VLam "P" $ \vP ->
+        VLam "m" $ \vM ->
+        VLam "x" $ \vX ->
+          let vM_tm = VLam "y" $ \vY ->
+                      VLam "ihs" $ \vIhs ->
+                      vApp (vApp (VSwitch vM (VFst vY)) (VSnd vY)) vIhs                    
+          in VElim vDescSum vP vM_tm vX
+      elimTmBodyTm = quoteTm (Lvl l_p) vElimTmBody
+      
+  in foldr (\(pName, _) acc -> Lam pName acc) elimTmBodyTm params
+
 infer :: Cxt -> Raw -> M (Tm, VTy)
 infer cxt = \case
   RSrcPos pos t -> infer (cxt {pos = pos}) t
@@ -666,6 +860,20 @@ infer cxt = \case
       tty ->
         report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt tty
 
+  RFst t -> do
+    (tTm, tTy) <- infer cxt t
+    case tTy of
+      VSigma _ a _ -> pure (Fst tTm, a)
+      VTensor a _  -> pure (Fst tTm, a)
+      _ -> report cxt "Expected a pair for fst"
+
+  RSnd t -> do
+    (tTm, tTy) <- infer cxt t
+    case tTy of
+      VSigma _ _ b -> pure (Snd tTm, b (applyFst (evalTm (env cxt) tTm)))
+      VTensor _ b  -> pure (Snd tTm, b)
+      _ -> report cxt "Expected a pair for snd"
+
   RLet x a t u -> do
     a <- checkTy cxt a Nothing
     let ~va = evalTy (env cxt) a
@@ -674,9 +882,60 @@ infer cxt = \case
     (u, uty) <- infer (define x vt va cxt) u  
     pure (Let x a t u, uty)
 
-  RData x params ty constrs u ->
-    report cxt "TODO."
+  RData x params ty constrs u -> do
+    (tyD, vTyD, uLevel) <- elabDataTy cxt params ty -- TODO : universe levels ?
+    
+    let cxt_with_D = bind x vTyD cxt
+    (cxt_params, pTyTms) <- buildParamCxt cxt_with_D params
+    
+    let constrsList = NE.toList constrs
+    let tagTm = elabTags constrsList
+    let tagTy = EnumT tagTm
+    let vTagTy = evalTy (env cxt_params) tagTy
+    let cxt_with_c = bind "c" vTagTy cxt_params
+    
+    desc_list <- forM constrsList $ \(_, cTyRaw) -> 
+                     elabConstrDesc x cxt_with_c cTyRaw
+                     
+    let n = length params
+    let tuple = foldr (\d acc -> Pair (DReturn d) acc) One desc_list
+    let descSum = elabFullDesc x n tagTy tuple
+    
+    -- TODO : universe level, here we take the code of (Mu descSum),
+    -- Maybe we don't really need this if we would want to define something like D (params : Tp) : Tp
+    -- This would involve making the sort Tp representable such that we are able to bind it
+    let muTm = Code uLevel (Mu descSum) 
+    let term_D = foldr (\(p, _) acc -> Lam p acc) muTm params
+    
+    let tags = iterate SuccE ZeroE
+    let vTermD = evalTm (env cxt) term_D
+    let cxt_initial_constrs = define x vTermD vTyD cxt
+    
+    (cxt_with_constrs, wrapLets, constrsData) <- elabConstrs x params cxt_initial_constrs (zip constrsList tags)
+    
+    -- Eliminators 
+    let vTuple = evalTm (env cxt_with_c) tuple
+    let vTagTm = evalTm (env cxt_params) tagTm
+    let vDescSum = evalDesc (env cxt_params) descSum
+    
+    let elimTyFull = elabElimTy uLevel x params pTyTms (lvl cxt_params) vTuple vTagTm -- TODO : universe level
+    let elimTmFull = elabElimTm params (lvl cxt_params) vDescSum
 
+    let vElimTy = evalTy (env cxt_initial_constrs) elimTyFull
+    let vElimTm = evalTm (env cxt_initial_constrs) elimTmFull
+
+    let elimName = "elim" ++ x
+    let cxt_final = define elimName vElimTm vElimTy cxt_with_constrs
+
+    (uTm, uTy) <- infer cxt_final u
+
+    let nfElimTy = quoteTy (lvl cxt_with_constrs) vElimTy
+    let nfElimTm = quoteTm (lvl cxt_with_constrs) vElimTm
+
+    let finalTm = Let x tyD term_D $
+                  wrapLets $
+                  Let elimName nfElimTy nfElimTm uTm
+    pure (finalTm, uTy)
 
   RU {} -> report cxt "Can't infer type for universe"
   RPi {} -> report cxt "Can't infer type for product type"
@@ -690,7 +949,7 @@ fresh :: [Name] -> Name -> Name
 fresh ns "_" = "_"
 fresh ns x | elem x ns = go (1 :: Int) where
   go n | elem (x ++ show n) ns = go (n + 1)
-       | otherwise             = x ++ show n
+       | otherwise             = x ++ show n  
 fresh ns x = x
 
 atomp = 3  :: Int -- U, var
@@ -705,7 +964,9 @@ prettyTm = goTm where
   goTm :: Int -> [Name] -> Tm -> ShowS
   goTm p ns = \case
     Var (Ix x) ->
-      case ns !! x of
+      if x < 0 || x >= length ns then 
+        (("Free" ++ show x) ++)
+      else case ns !! x of
         "_"   -> ("@"++).(show x++)
         n     -> (n++)
 
@@ -714,6 +975,9 @@ prettyTm = goTm where
     Lam (fresh ns -> x) t -> par p letp $ ("λ "++) . (x++) . goLam (x:ns) t where
       goLam ns (Lam (fresh ns -> x) t) = (' ':) . (x++) . goLam (x:ns) t
       goLam ns t = (". "++) . goTm letp ns t
+
+    Fst t -> par p appp $ ("fst "++) . goTm atomp ns t
+    Snd t -> par p appp $ ("snd "++) . goTm atomp ns t
 
     Code i t -> ('[':).prettyTy letp ns t.(']':)
 
@@ -735,13 +999,15 @@ prettyTm = goTm where
 
     Elim d c m n -> par p appp $ ("elim "++) . prettyDesc atomp ns d . (' ':) . goTm atomp ns c . (' ':) . goTm atomp ns m . (' ':) . goTm atomp ns n
 
+    DReturn d -> par p appp $ ("return "++) . prettyDesc atomp ns d
+
     NilE -> ("nil"++)
 
     ConsE n t -> par p appp $ ("cons "++) . (n++) . (' ':) . goTm atomp ns t
 
     ZeroE -> ("0"++)
 
-    SuccE t -> par p appp $ ("1+ "++) . goTm atomp ns t
+    SuccE t -> par p appp $ ("1 + "++) . goTm atomp ns t
 
     Switch t u -> par p appp $ ("switch "++) . goTm atomp ns t . (' ':) . goTm atomp ns u
 
@@ -793,7 +1059,7 @@ prettyDesc = goDesc where
 
     DescVar -> ("X"++)
 
-    DescTensor d1 d2 -> par p appp $ goDesc atomp ns d1 . (" ⊗ "++) . goDesc atomp ns d2
+    DescTensor d1 d2 -> par p appp $ goDesc atomp ns d1 . (" ⊗  "++) . goDesc atomp ns d2
 
     DescSum (fresh ns -> x) a d -> par p pip $ ("Σ "++) . showParen True ((x++) . (" : "++) . prettyTy letp ns a) . (". "++) . goDesc pip (x:ns) d
 
@@ -823,7 +1089,7 @@ pArrow   = symbol "→" <|> symbol "->"
 decimal  = lexeme L.decimal
 
 keyword :: String -> Bool
-keyword x = x == "let" || x == "λ" || x == "U" || x == "data" || x == "where"
+keyword x = x `elem` ["let", "λ", "U", "data", "where", "fst", "snd"]
 
 pIdent :: Parser Name
 pIdent = try $ do
@@ -841,6 +1107,16 @@ pAtom =
       withPos (
             (RVar <$> pIdent)
         <|> (RU <$> (pKeyword "U" *> decimal))
+        <|> (ROne <$ symbol "*")
+        <|> (RFst <$> (pKeyword "fst" *> pAtom))
+        <|> (RSnd <$> (pKeyword "snd" *> pAtom))
+        <|> try (do
+              symbol "⟨" <|> symbol "<"
+              t <- pRaw
+              symbol ","
+              u <- pRaw
+              symbol "⟩" <|> symbol ">"
+              pure (RPair t u))
       )
   <|> parens pRaw
 
@@ -962,7 +1238,7 @@ mainWith getOpt getRaw = do
     _ -> putStrLn helpMsg
 
 main :: IO ()
-main = ex0
+main = ex1
 
 -- | Run main with inputs as function arguments.
 main' :: String -> String -> IO ()
