@@ -1,0 +1,8 @@
+data List (A : Tp) : Tp where {
+  nil : List A ;
+  cons : A -> List A -> List A
+} ;
+
+let ParadoxList : Tp = List Tp ;
+
+ParadoxList

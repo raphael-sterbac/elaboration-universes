@@ -1,0 +1,11 @@
+data List (A : Tp) : Tp where {
+  nil : List A ;
+  cons : A -> List A -> List A
+} ;
+
+let validTypeList : U 1 = List (U 0) @ 1 ;
+
+-- should fail
+let invalidTypeList : U 0 = List (U 0) @ 0 ;
+
+validTypeList

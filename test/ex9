@@ -1,0 +1,13 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data InfTree (A : Tp) : Tp where {
+  leaf : InfTree A ;
+  node : (Nat -> InfTree A) -> InfTree A
+} ;
+
+let myTree : U 0 = InfTree Nat @ 0 ;
+
+myTree

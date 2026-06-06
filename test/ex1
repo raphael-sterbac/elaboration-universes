@@ -1,9 +1,9 @@
-data Nat : U 0 where {
+data Nat : Tp where {
   zero : Nat ;
   succ : Nat -> Nat
 } ;
 
-data List (A : U 0) : U 0 where {
+data List (A : Tp) : Tp where {
   nil : List A ;
   cons : A -> List A -> List A
 } ;

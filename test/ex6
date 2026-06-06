@@ -1,0 +1,26 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data List (A : Tp) : Tp where {
+  nil : List A ;
+  cons : A -> List A -> List A
+} ;
+
+let TypeList : Tp = List (U 0) ;
+
+let types1 : TypeList = cons (U 0) Nat (nil (U 0)) ;
+
+let types2 : TypeList = cons (U 0) (List Nat @ 0) types1 ;
+
+let getHead : TypeList -> U 0 = \l.
+  elimList (U 0) (\_. U 0)
+    < \p ihs. Nat ,
+    < \p ihs. fst p ,
+    * > >
+    l ;
+
+let mySmallList : getHead types2 = cons Nat zero (cons Nat (succ zero) (nil Nat)) ;
+
+mySmallList

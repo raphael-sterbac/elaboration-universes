@@ -1,0 +1,16 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data List (A : Tp) : Tp where {
+  nil : List A ;
+  cons : A -> List A -> List A
+} ;
+
+-- should fail (nested inductive)
+data RoseTree (A : Tp) : Tp where {
+  node : A -> List (RoseTree A) -> RoseTree A
+} ;
+
+elimRoseTree

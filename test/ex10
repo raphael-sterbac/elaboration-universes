@@ -1,0 +1,14 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data BadTree (A : Tp) : Tp where {
+  leaf : BadTree A ;
+  node : (U 0 -> BadTree A) -> BadTree A
+} ;
+
+-- should fail
+let trapTree : U 0 = BadTree Nat @ 0 ;
+
+trapTree

@@ -1,0 +1,11 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+let ValidPredicate : U 1 = U 0 -> Nat ;
+
+-- should fail
+let badPredicate : U 0 = (U 0 -> Nat) @ 0 ;
+
+badPredicate
