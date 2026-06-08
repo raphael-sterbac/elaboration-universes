@@ -72,16 +72,15 @@ data MonadCat (C : Category) : Tp where {
                MonadCat C
 } ;
 
-let MuOf : (C : Category) -> (M : MonadCat C) -> 
-           NatTrans C C (CompFunctor C C C  (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> M)
-                                            (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> M))
-                        (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> M) = \C M.
-  elimMonadCat C (\MIn. NatTrans C C (CompFunctor C C C (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> MIn)
-                                                        (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> MIn))
-                                      (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> MIn))
-    < \p ihs. fst (snd (snd p)) , * > 
-    M ;
+let GetT : (C : Category) -> MonadCat C -> Functor C C = \C M.
+  elimMonadCat C (\_. Functor C C) <\p i. fst p , *> M ;
 
+let GetMu : (C : Category) -> (M : MonadCat C) -> NatTrans C C (CompFunctor C C C (GetT C M) (GetT C M)) (GetT C M) = \C M.
+  elimMonadCat C (\MIn. NatTrans C C (CompFunctor C C C (GetT C MIn) (GetT C MIn)) (GetT C MIn)) < \p i. fst (snd (snd p)) , * > M ;
+
+let MuOf : (C : Category) -> (M : MonadCat C) -> 
+           NatTrans C C (CompFunctor C C C (GetT C M) (GetT C M)) (GetT C M) = \C M.
+  GetMu C M ;
 
 let TypeCat : Category =
   mkCat (U 0)

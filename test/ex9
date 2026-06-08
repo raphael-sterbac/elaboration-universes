@@ -8,7 +8,6 @@ data List (A : Tp) : Tp where {
   cons : A -> List A -> List A
 } ;
 
--- Big monad record type ! 
 data Monad : Tp where {
   mkMonad : (M : Tp -> Tp) ->
             (ret : (A : Tp) -> A -> M A) ->

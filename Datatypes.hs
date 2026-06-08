@@ -541,7 +541,6 @@ isSmall cxt i = \case
   VPi _ a b -> do
       isSmall cxt i a
       isSmall cxt i (b (VVar (lvl cxt)))
-      
 
   -- TODO : This is a bit weird, shouldn't we "evaluate" in evalTy ?
   VSigma _ a b -> case a of
@@ -634,7 +633,7 @@ checkTy cxt t size = case t of
             isSmall cxt size (evalTy (env cxt) ty)
             pure ty
         
-      _ -> report cxt "Elaboration error: Expected a code"
+      _ -> report cxt "Elaboration error: Expected a small type"
     
 check :: Cxt -> Raw -> VTy -> M Tm
 check cxt t a = case (t, a) of
@@ -681,6 +680,8 @@ check cxt t a = case (t, a) of
     (m, bTy) <- infer cxt t
     coe cxt (lvl cxt) bTy a m
     
+
+-- Checks if the argument is recursive
 isRec :: Name -> Raw -> Bool
 isRec d (RSrcPos _ t) = isRec d t 
 isRec d (RVar y) = y == d
@@ -821,7 +822,6 @@ elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm vTermD =
       vTarget v = VDecode Omega v
       
       -- TODO : check the "hardcoded" eliminator type more carefuly
-      -- I have put Omega to allow large elimination, should we ?
       vElimTyBody =
         VPi "P" vPTy $ \vP ->
           

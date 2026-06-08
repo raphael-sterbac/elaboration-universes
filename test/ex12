@@ -1,0 +1,100 @@
+
+data Category : U 1 where {
+  mkCat : (Obj : U 1) ->
+          (Hom : Obj -> Obj -> U 1) ->
+          (id : (x : Obj) -> Hom x x) ->
+          (comp : (x : Obj) -> (y : Obj) -> (z : Obj) -> Hom y z -> Hom x y -> Hom x z) ->
+          Category
+} ;
+
+let ObjOf : Category -> Tp = \C.
+  elimCategory (\_. Tp)
+    < \p ihs. fst p , * > 
+    C ;
+
+let HomOf : (C : Category) -> ObjOf C -> ObjOf C -> Tp = \C.
+  elimCategory (\CIn. ObjOf CIn -> ObjOf CIn -> Tp)
+    < \p ihs. fst (snd p) , * > 
+    C ;
+
+let IdOf : (C : Category) -> (x : ObjOf C) -> HomOf C x x = \C.
+  elimCategory (\Cin. (x : ObjOf Cin) -> HomOf Cin x x) < \p i. fst (snd (snd p)) , * > C ;
+
+let CompOf : (C : Category) -> (x : ObjOf C) -> (y : ObjOf C) -> (z : ObjOf C) -> 
+             HomOf C y z -> HomOf C x y -> HomOf C x z = \C.
+  let Motive : Category -> Tp = \Cin. (x : ObjOf Cin) -> (y : ObjOf Cin) -> (z : ObjOf Cin) -> HomOf Cin y z -> HomOf Cin x y -> HomOf Cin x z ;
+  elimCategory Motive < \p i. fst (snd (snd (snd p))) , * > C ;
+
+data Functor (C : Category) (D : Category) : U 1 where {
+  mkFunctor : (FObj : ObjOf C -> ObjOf D) ->
+              (FHom : (x : ObjOf C) -> (y : ObjOf C) -> HomOf C x y -> HomOf D (FObj x) (FObj y)) ->
+              Functor C D
+} ;
+
+let FObjOf : (C : Category) -> (D : Category) -> Functor C D -> ObjOf C -> ObjOf D = \C D F.
+  elimFunctor C D (\FIn. ObjOf C -> ObjOf D)
+    < \p ihs. fst p , * > 
+    F ;
+
+let FHomOf : (C : Category) -> (D : Category) -> (F : Functor C D) -> 
+             (x : ObjOf C) -> (y : ObjOf C) -> HomOf C x y -> HomOf D (FObjOf C D F x) (FObjOf C D F y) = \C D F.
+  let Motive : Functor C D -> Tp = \Fin. (x : ObjOf C) -> (y : ObjOf C) -> HomOf C x y -> HomOf D (FObjOf C D Fin x) (FObjOf C D Fin y) ;
+  elimFunctor C D Motive
+    < \p ihs. \x y hom. (fst (snd p)) x y hom , * > 
+    F ;
+
+data NatTrans (C : Category) (D : Category) (F : Functor C D) (G : Functor C D) : U 1 where {
+  mkNatTrans : (cmp : (x : ObjOf C) -> HomOf D (FObjOf C D F x) (FObjOf C D G x)) ->
+               NatTrans C D F G
+} ;
+
+let CmpOf : (C : Category) -> (D : Category) -> (F : Functor C D) -> (G : Functor C D) -> 
+            (N : NatTrans C D F G) -> (x : ObjOf C) -> HomOf D (FObjOf C D F x) (FObjOf C D G x) = \C D F G N.
+  let Motive : NatTrans C D F G -> Tp = \Nin. (x : ObjOf C) -> HomOf D (FObjOf C D F x) (FObjOf C D G x) ;
+  elimNatTrans C D F G Motive
+    < \p ihs. fst p , * > 
+    N ;
+
+let IdFunctor : (C : Category) -> Functor C C = \C.
+  mkFunctor C C (\x. x) (\x y f. f) ;
+
+let CompFunctor : (C : Category) -> (D : Category) -> (E : Category) -> 
+                  Functor D E -> Functor C D -> Functor C E = \C D E F G.
+  mkFunctor C E
+    (\x. FObjOf D E F (FObjOf C D G x))
+    (\x y f. FHomOf D E F (FObjOf C D G x) (FObjOf C D G y) (FHomOf C D G x y f)) ;
+
+let IdNatTrans : (C : Category) -> (D : Category) -> (F : Functor C D) -> NatTrans C D F F = \C D F.
+  mkNatTrans C D F F (\x. IdOf D (FObjOf C D F x)) ;
+
+let CompNatTrans : (C : Category) -> (D : Category) -> (F : Functor C D) -> (G : Functor C D) -> (H : Functor C D) ->
+                   NatTrans C D G H -> NatTrans C D F G -> NatTrans C D F H = \C D F G H Beta Alpha.
+  mkNatTrans C D F H
+    (\x. CompOf D (FObjOf C D F x) (FObjOf C D G x) (FObjOf C D H x) 
+                    (CmpOf C D G H Beta x) (CmpOf C D F G Alpha x)) ;
+
+let FunctorCat : (C : Category) -> (D : Category) -> Category = \C D.
+  mkCat (Functor C D)
+        (\F G. NatTrans C D F G)
+        (\F. IdNatTrans C D F)
+        (\F G H Beta Alpha. CompNatTrans C D F G H Beta Alpha) ;
+
+let CatOfSmallCats : Category =
+  mkCat Category
+        (\C D. Functor C D )
+        (\C. IdFunctor C )
+        (\C D E G F. CompFunctor C D E G F ) ;
+
+let TypeCat : Category =
+  mkCat (U 0)
+        (\A B. A -> B)
+        (\A x. x)
+        (\A B K g f x. g (f x)) ;
+
+let EndoFunctorsOnTypes : Category = FunctorCat TypeCat TypeCat ;
+
+let IdEndo : Functor TypeCat TypeCat = IdFunctor TypeCat ;
+
+let DoubleId : Functor TypeCat TypeCat = CompFunctor TypeCat TypeCat TypeCat IdEndo IdEndo ;
+
+IdNatTrans TypeCat TypeCat DoubleId
