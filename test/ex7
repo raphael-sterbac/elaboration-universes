@@ -3,12 +3,11 @@ data Nat : U 0 where {
   succ : Nat -> Nat
 } ;
 
-data BadList : Tp where {
-  nil : BadList ;
-  cons : Tp -> BadList -> BadList
+data InfTree (A : Tp) : Tp where {
+  leaf : InfTree A ;
+  node : (Nat -> InfTree A) -> InfTree A
 } ;
 
--- should fail
-let illegalType : U 0 = BadList @ 0 ;
+let myTree : U 0 = InfTree Nat @ 0 ;
 
-illegalType
+myTree

@@ -1,11 +1,26 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
 data List (A : Tp) : Tp where {
   nil : List A ;
   cons : A -> List A -> List A
 } ;
 
-let validTypeList : U 1 = List (U 0) @ 1 ;
+let UniverseList : Tp = List (U 1) ;
 
--- should fail
-let invalidTypeList : U 0 = List (U 0) @ 0 ;
+let myTypes : UniverseList = cons (U 1) (U 0) (cons (U 1) (Nat -> Nat) (nil (U 1))) ;
 
-validTypeList
+let headTy : UniverseList -> U 1 = \l.
+  elimList (U 1) (\_. U 1)
+    < \p ihs. U 0 ,         
+    < \p ihs. fst p ,     
+    * > >
+    l ;
+
+let myExtractedUniverse : headTy myTypes = Nat ;
+
+let myVal : myExtractedUniverse = zero ;
+
+myVal

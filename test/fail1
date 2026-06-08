@@ -1,0 +1,14 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data BadList : Tp where {
+  nil : BadList ;
+  cons : Tp -> BadList -> BadList
+} ;
+
+-- should fail
+let illegalType : U 0 = BadList @ 0 ;
+
+illegalType

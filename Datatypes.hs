@@ -24,23 +24,44 @@ newtype Ix  = Ix  Int deriving (Eq, Show, Num) via Int
 -- De Bruijn level.
 newtype Lvl = Lvl Int deriving (Eq, Show, Num) via Int
 
+data Size = Sz Int | Big | Omega deriving (Eq)
+
+instance Ord Size where
+  Sz i <= Sz j = i <= j
+  Sz _ <= Big = True
+  Sz _ <= Omega = True
+  Big <= Big = True
+  Big <= Omega = True
+  Omega <= Omega = True
+  _ <= _ = False
+
+  Sz i < Sz j = i < j
+  Sz _ < Big = True
+  Sz _ < Omega = True
+  Big < Omega = True
+  _ < _ = False
+
+instance Show Size where
+  show (Sz i) = show i
+  show Big    = "Tp"
+  show Omega  = "Omega"
+
 type Name = String
 
 data Raw
-  = RVar Name              -- x
-  | RLam Name Raw          -- \x. t
-  | RApp Raw Raw           -- t u
-  | RU Int                 -- U i
-  | RTp                    -- Sort Tp
-  | RPi Name Raw Raw       -- (x : A) -> B
+  = RVar Name
+  | RLam Name Raw
+  | RApp Raw Raw
+  | RU Size
+  | RPi Name Raw Raw
   | RPair Raw Raw
   | ROne
-  | RAt Raw Int            -- Datatype smallness modificator
+  | RAt Raw Size
   | RFst Raw
   | RSnd Raw
-  | RLet Name Raw Raw Raw  -- let x : A = t in u
-  | RSrcPos SourcePos Raw  -- source position for error reporting
-  | RData Name [(Name, Raw)] Raw (NonEmpty (Name, Raw)) Raw -- Datatype definition
+  | RLet Name Raw Raw Raw
+  | RSrcPos SourcePos Raw
+  | RData Name [(Name, Raw)] Raw (NonEmpty (Name, Raw)) Raw
   deriving Show
 
 -- core syntax
@@ -59,10 +80,8 @@ data Desc
 
 data Ty
   = Pi Name ~Ty Ty
-  | U Int 
-  | Decode Int Tm
-  | Tp
-  | El Tm
+  | U Size 
+  | Decode Size Tm
   | Unit
   | Sigma Name ~Ty Ty
   | Tensor Ty Ty
@@ -79,8 +98,7 @@ data Ty
 data Tm
   = Var Ix
   | App Tm ~Tm
-  | Code Int Ty
-  | CodeTp Ty
+  | Code Size Ty
   | Lam Name Tm
   | Let Name Ty Tm Tm
   | Pair Tm Tm
@@ -110,10 +128,8 @@ data VLabel = VData Name [VTm]
 
 data VTy
   = VPi Name ~VTy (VTm -> VTy)
-  | VU Int 
-  | VDecode Int VTm
-  | VTp
-  | VEl VTm
+  | VU Size 
+  | VDecode Size VTm
   | VSigma Name VTy (VTm -> VTy)
   | VUnit
   -- Descriptions
@@ -130,8 +146,7 @@ data VTy
 data VTm
   = VVar Lvl
   | VApp VTm ~VTm
-  | VCode Int VTy
-  | VCodeTp VTy
+  | VCode Size VTy
   | VLam Name (VTm -> VTm)
   | VPair VTm VTm
   | VDPair Name VTm VTm
@@ -227,8 +242,7 @@ evalTm env = \case
   ConLabel n t  -> VConLabel n (evalTm env t)
   
   -- Case of a Coding
-  Code i a      -> VCode i (evalTy env a)
-  CodeTp a      -> VCodeTp (evalTy env a)
+  Code s a      -> VCode s (evalTy env a)
   
   -- Descriptions
   ExtMap d f m -> 
@@ -283,8 +297,7 @@ applySquare vd p vm = case vd of
 evalTy :: Env -> Ty -> VTy
 evalTy env = \case
   Pi x a b      -> VPi x (evalTy env a) \v -> evalTy (v:env) b
-  U i           -> VU i
-  Tp            -> VTp
+  U s           -> VU s
   Sigma x a b   -> VSigma x (evalTy env a) \v -> evalTy (v:env) b
   Tensor a b    -> VTensor (evalTy env a) (evalTy env b)
   Unit          -> VUnit
@@ -292,12 +305,8 @@ evalTy env = \case
 
   -- Case of a Decoding
   Decode i t    -> case evalTm env t of
-    VCode j a | i == j  -> a             -- Beta Rule for the Universe
+    VCode j a | i == j  -> a
     v                   -> VDecode i v
-  
-  El t -> case evalTm env t of
-    VCodeTp a -> a
-    v         -> VEl v
 
   -- Descriptions
   Ext d x -> 
@@ -344,8 +353,7 @@ quoteTm l = \case
   VConLabel n t -> ConLabel n (quoteTm l t)
 
   -- Case of a Coding
-  VCode i a   -> Code i (quoteTy l a)
-  VCodeTp a   -> CodeTp (quoteTy l a)
+  VCode s a   -> Code s (quoteTy l a)
 
   -- Descriptions
   VIn t -> In (quoteTm l t)
@@ -364,16 +372,14 @@ quoteTm l = \case
 quoteTy :: Lvl -> VTy -> Ty
 quoteTy l = \case
   VPi  x a b  -> Pi x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
-  VU i        -> U i
-  VTp         -> Tp
+  VU s        -> U s
   VSigma x a b -> Sigma x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
   VUnit       -> Unit
   VTensor a b -> Tensor (quoteTy l a) (quoteTy l b)
   VDLabel (VData n ts) ty -> DLabel (Data n (map (quoteTm l) ts)) (quoteTy l ty)
   
   -- Case of a Decoding
-  VDecode i t -> Decode i (quoteTm l t)
-  VEl t       -> El (quoteTm l t)
+  VDecode s t -> Decode s (quoteTm l t)
 
   -- Descriptions
   VSquare d p m -> Square (quoteDesc l d) (quoteTy (l + 1) (p (VVar l))) (quoteTm l m)
@@ -416,8 +422,7 @@ convTm l t u =
   (VFst t, VFst u) -> convTm l t u
   (VSnd t, VSnd u) -> convTm l t u
 
-  (VCode i a, VCode j b) | i == j -> convTy l a b
-  (VCodeTp a, VCodeTp b) -> convTy l a b
+  (VCode s a, VCode s' b) | s == s' -> convTy l a b
 
   -- Descriptions
   (VIn t1, VIn t2) -> convTm l t1 t2
@@ -440,15 +445,13 @@ convTy l t u =
   let strip (VDLabel _ ty) = strip ty
       strip ty = ty
   in case (strip t, strip u) of
-  (VU i, VU i') -> i == i'
-  (VTp, VTp) -> True
+  (VU s, VU s') -> s == s'
   (VUnit, VUnit) -> True
   (VTensor a b, VTensor a' b') -> convTy l a a' && convTy l b b'
 
   (VPi _ a b, VPi _ a' b') -> convTy l a a' && convTy (l + 1) (b (VVar l)) (b' (VVar l))
   (VSigma _ a b, VSigma _ a' b') -> convTy l a a' && convTy (l + 1) (b (VVar l)) (b' (VVar l))
   (VDecode i a, VDecode j b) | i == j -> convTm l a b
-  (VEl t, VEl t') -> convTm l t t'
 
   -- Descriptions
   (VSquare d p m, VSquare d' p' m') -> convDesc l d d'  && convTy (l + 1) (p (VVar l)) (p' (VVar l))  && convTm l m m'
@@ -521,26 +524,26 @@ showVTy cxt v = showTy cxt $ quoteTy (lvl cxt) v
 
 --------------------------------------------------------------------------------
 
-inferU :: Cxt -> Raw -> M (Tm, Int)
+inferU :: Cxt -> Raw -> M (Tm, Size)
 inferU cxt t = do
-  (t, a) <- infer cxt t
+  (t', a) <- infer cxt t
   case a of
-    VU i -> pure (t, i)
+    VU i -> pure (t', i)
     _    -> report cxt "expected a type"
     
-isSmall :: Cxt -> Int -> VTy -> M ()
+isSmall :: Cxt -> Size -> VTy -> M ()
 isSmall cxt i = \case
   VU j | j < i -> pure ()
-  VU j -> report cxt ("Universe U " ++ show j ++ " is not small at level " ++ show i)
+  VU j -> report cxt ("Universe " ++ show j ++ " is not small at level " ++ show i)
   VDecode j _ | j <= i -> pure ()
   VDecode j _ -> report cxt ("Decoded type at level " ++ show j ++ " is not small at level " ++ show i)
-  VTp -> report cxt ("Tp is not small at level " ++ show i)
-  VEl _ -> report cxt ("Opaque large type is not small at level " ++ show i)
   
   VPi _ a b -> do
       isSmall cxt i a
       isSmall cxt i (b (VVar (lvl cxt)))
       
+
+  -- TODO : This is a bit weird, shouldn't we "evaluate" in evalTy ?
   VSigma _ a b -> case a of
       VEnumT tags -> do
           let checkBranches t idx = case t of
@@ -576,10 +579,6 @@ coe :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
 coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
   (VU i, VU j) | i <= j -> 
     pure $ Code j (Decode i m)
-  (VU i, VTp) -> 
-    pure $ CodeTp (Decode i m)
-  (VTp, VTp) -> 
-    pure m
 
   (VPi n1 a1 b1, VPi n2 a2 b2) -> do
     let cxt' = bind n2 a2 cxt
@@ -590,10 +589,10 @@ coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
     let env' = env cxt'
     let vu_x = evalTm env' u_x
     let vm = evalTm (env cxt) m
-    let vApp = case vm of
+    let vApp' = case vm of
                 VLam _ f -> f vu_x
                 _        -> VApp vm vu_x
-    let m_u_x = quoteTm l' vApp
+    let m_u_x = quoteTm l' vApp'
     
     n_x <- coe cxt' l' (b1 vu_x) (b2 (VVar l)) m_u_x
     
@@ -604,22 +603,19 @@ coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
       pure m 
     else report cxt "Error: Invalid coercion"
 
-checkTy :: Cxt -> Raw -> Maybe Int -> M Ty
+checkTy :: Cxt -> Raw -> Size -> M Ty
 checkTy cxt t size = case t of
   RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
 
-  RU i -> case size of 
-    Nothing -> pure $ U i
-    Just j | i < j -> pure $ U i
-    Just k -> report cxt ("Size issue: U " ++ show i ++ ", but expected a universe in U " ++ show k)
+  RU s' -> 
+    if s' < size 
+    then pure $ U s'
+    else report cxt ("Size issue: U " ++ show s' ++ " is too large to fit in " ++ show size)
 
-  RTp -> case size of 
-    Nothing -> pure Tp
-    Just k -> report cxt ("Size issue: Tp is too large to fit in U " ++ show k)
-
-  RAt t i -> case size of
-    Just k | i > k -> report cxt ("Size annotation @" ++ show i ++ " is too large for expected size " ++ show k)
-    _ -> checkTy cxt t (Just i)
+  RAt t s' -> 
+    if s' > size 
+    then report cxt ("Size annotation @" ++ show s' ++ " is too large for expected size " ++ show size)
+    else checkTy cxt t s'
 
   RPi x a b -> do
     a' <- checkTy cxt a size
@@ -627,21 +623,18 @@ checkTy cxt t size = case t of
     b' <- checkTy cxt' b size
     pure $ Pi x a' b'
 
-  -- mode switch
   _ -> do 
-    (t, a) <- infer cxt t
-    case a of
-      VU i -> case size of 
-        Nothing -> pure (Decode i t)
-        Just j | i <= j -> pure (Decode i t)
-        Just k -> report cxt ("Size issue: got a code at level " ++ show i ++ ", but expected  " ++ show k)
-      VTp -> do
-        let ty = El t
-        case size of 
-          Nothing -> pure ty
-          Just k -> do
-            isSmall cxt k (evalTy (env cxt) ty)
+    (tTm, aTy) <- infer cxt t
+    case aTy of
+      VU s' -> 
+        if s' <= size 
+        then pure (Decode s' tTm)
+        else do
+            let ty = Decode s' tTm
+            isSmall cxt size (evalTy (env cxt) ty)
             pure ty
+        
+      _ -> report cxt "Elaboration error: Expected a code"
     
 check :: Cxt -> Raw -> VTy -> M Tm
 check cxt t a = case (t, a) of
@@ -650,13 +643,9 @@ check cxt t a = case (t, a) of
   (RLam x t, VPi x' a b) ->
     Lam x <$> check (bind x a cxt) t (b (VVar (lvl cxt)))
 
-  (_, VU i) -> do
-    u <- checkTy cxt t (Just i)
-    pure $ Code i u
-
-  (_, VTp) -> do
-    u <- checkTy cxt t Nothing
-    pure $ CodeTp u
+  (_, VU s) -> do
+    u <- checkTy cxt t s
+    pure $ Code s u
 
   (ROne, VUnit) -> pure One
 
@@ -664,12 +653,12 @@ check cxt t a = case (t, a) of
 
   (RPair t1 t2, VSmallPiE (VConsE _ eRest) f) -> do
       let getTy (VCode _ ty) = ty
-          getTy (VCodeTp ty) = ty
-          getTy v            = VDecode 0 v -- TODO : here weird ?
+          getTy v            = VDecode Big v 
           
       u1 <- check cxt t1 (getTy (vApp f VZeroE))
-      u2 <- check cxt t2 (VSmallPiE eRest (VLam "c" \c -> vApp f (VSuccE c)))
+      u2 <- check cxt t2 (VSmallPiE eRest (VLam "e" \e -> vApp f (VSuccE e)))
       pure (Pair u1 u2)
+
   (RPair t1 t2, VSigma x a b) -> do
       u1 <- check cxt t1 a
       u2 <- check cxt t2 (b (evalTm (env cxt) u1))
@@ -680,15 +669,14 @@ check cxt t a = case (t, a) of
       u2 <- check cxt t2 b
       pure (Pair u1 u2)
 
-  (RLet x a t u, a') -> do
-    a <- checkTy cxt a Nothing
-    let ~va = evalTy (env cxt) a
-    t <- check cxt t va
-    let ~vt = evalTm (env cxt) t
-    u <- check (define x vt va cxt) u a' 
-    pure (Let x a t u)
+  (RLet x aTm tTm uTm, a') -> do
+    aTm' <- checkTy cxt aTm Omega
+    let ~va = evalTy (env cxt) aTm'
+    tTm' <- check cxt tTm va
+    let ~vt = evalTm (env cxt) tTm'
+    uTm' <- check (define x vt va cxt) uTm a' 
+    pure (Let x aTm' tTm' uTm')
 
-  -- mode switch
   _ -> do
     (m, bTy) <- infer cxt t
     coe cxt (lvl cxt) bTy a m
@@ -699,6 +687,9 @@ isRec d (RVar y) = y == d
 isRec d (RApp f _) = isRec d f
 isRec d _ = False
 
+
+-- Function to handle "infinite" recursive definitions, like ex9
+-- TODO : check this more carefuly
 isInfRec :: Name -> Raw -> Bool
 isInfRec d = \case
   RSrcPos _ t -> isInfRec d t
@@ -710,10 +701,10 @@ checkInfRec dName c = \case
   RSrcPos pos t -> checkInfRec dName (c {pos = pos}) t
   RPi z dom cod -> do
     if isRec dName cod then do
-      domTy <- checkTy c dom Nothing
+      domTy <- checkTy c dom Omega
       pure $ Just (DescProd z domTy DescVar)
     else do
-      domTy <- checkTy c dom Nothing
+      domTy <- checkTy c dom Omega
       let vDom = evalTy (env c) domTy
       res <- checkInfRec dName (bind z vDom c) cod
       case res of
@@ -721,23 +712,24 @@ checkInfRec dName c = \case
         Nothing -> pure Nothing
   _ -> pure Nothing
 
-elabDataTy :: Cxt -> [(Name, Raw)] -> Raw -> M (Ty, VTy, Maybe Int)
+-- Elaborates the type of the big Pi of the parameters, returns the type, its semantics and its size
+elabDataTy :: Cxt -> [(Name, Raw)] -> Raw -> M (Ty, VTy, Size)
 elabDataTy cxt params ty = do
   let tyD_raw = foldr (\(p, pTy) acc -> RPi p pTy acc) ty params
-  tyD <- checkTy cxt tyD_raw Nothing
+  tyD <- checkTy cxt tyD_raw Omega
   let vTyD = evalTy (env cxt) tyD
-  let getUniverseLevel Tp = Nothing
-      getUniverseLevel (El _) = Nothing
-      getUniverseLevel (U i) = Just i
-      getUniverseLevel (Decode i _) = Just i
-      getUniverseLevel (Pi _ _ b) = getUniverseLevel b
-      getUniverseLevel _ = Just 0 -- TODO : Here Nothing ?
-  pure (tyD, vTyD, getUniverseLevel tyD)
 
+  let getSize (U s) = s
+      getSize (Decode s _) = s
+      getSize (Pi _ _ b) = getSize b
+      getSize _ = Big
+  pure (tyD, vTyD, getSize tyD)
+
+-- Adds all the parameters in the context
 buildParamCxt :: Cxt -> [(Name, Raw)] -> M (Cxt, [Ty])
 buildParamCxt c [] = pure (c, [])
 buildParamCxt c ((p, pTy):ps) = do
-  pTyTm <- checkTy c pTy Nothing
+  pTyTm <- checkTy c pTy Omega
   let vpTy = evalTy (env c) pTyTm
   (c', pTyTms) <- buildParamCxt (bind p vpTy c) ps
   pure (c', pTyTm : pTyTms)
@@ -745,6 +737,7 @@ buildParamCxt c ((p, pTy):ps) = do
 elabTags :: [(Name, Raw)] -> Tm
 elabTags = foldr (\(cName, _) acc -> ConsE cName acc) NilE
 
+-- Elaborates the description associated to a raw term (rule d)
 elabConstrDesc :: Name -> Cxt -> Raw -> M Desc
 elabConstrDesc dName c = \case
   RSrcPos pos t -> elabConstrDesc dName (c {pos = pos}) t 
@@ -759,12 +752,13 @@ elabConstrDesc dName c = \case
           rest <- elabConstrDesc dName c b
           pure $ DescTensor d_a rest
         Nothing -> do
-          aTy <- checkTy c a Nothing
+          aTy <- checkTy c a Omega
           let va = evalTy (env c) aTy
           rest <- elabConstrDesc dName (bind y va c) b
           pure $ DescSum y aTy rest
   _ -> pure DescUnit
 
+-- Elaborates the full description with all the parameters, by calling elabConstrDesc
 elabFullDesc :: Name -> Int -> Ty -> Tm -> Desc
 elabFullDesc dName numParams tagTy tuple =
   let paramVars = [Var (Ix i) | i <- [numParams, numParams - 1 .. 1]]
@@ -780,6 +774,7 @@ elabConstrTm dName cName params cTyRaw cTag =
       args = getArgs cTyRaw
       numArgs = length args
       
+      -- TODO : Check this more carefuly
       buildPayload (RSrcPos _ t) idx = buildPayload t idx
       buildPayload (RPi y a b) idx =
         if isRec dName a || isInfRec dName a then
@@ -798,7 +793,7 @@ elabConstrs dName params c [] = pure (c, id, [])
 elabConstrs dName params c (((cName, cTyRaw), cTag) : rest) = do
   let fullTyRaw = foldr (\(p, pTy) acc -> RPi p pTy acc) cTyRaw params
   
-  cTyTm <- checkTy c fullTyRaw Nothing
+  cTyTm <- checkTy c fullTyRaw Omega
   let term = elabConstrTm dName cName params cTyRaw cTag  
 
   let vcTy = evalTy (env c) cTyTm
@@ -808,20 +803,20 @@ elabConstrs dName params c (((cName, cTyRaw), cTag) : rest) = do
   
   pure (cFinal, \body -> Let cName cTyTm term (wrapLet body), (cName, cTyTm, term) : constrsData)
 
-elabElimTy :: Maybe Int -> Name -> [(Name, Raw)] -> [Ty] -> Lvl -> VTm -> VTm -> Ty
+-- Elaborates the eliminator type
+elabElimTy :: Size -> Name -> [(Name, Raw)] -> [Ty] -> Lvl -> VTm -> VTm -> Ty
 elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm =
   let n = length params
       
       vParams = [VVar (Lvl i) | i <- [l_p - n .. l_p - 1]]
       vDatatypeCode = foldl vApp (VVar (Lvl (l_p - n - 1))) vParams
       
-      vDatatype = case uLevel of 
-                    Just l -> VDecode l vDatatypeCode
-                    Nothing -> VEl vDatatypeCode
+      vDatatype = VDecode uLevel vDatatypeCode
       
-      vPTy = VPi "x" vDatatype (\_ -> case uLevel of Just l -> VU l; Nothing -> VTp)
-      vTarget v = case uLevel of Just l -> VDecode l v; Nothing -> VEl v
+      vPTy = VPi "x" vDatatype (\_ -> VU uLevel)
+      vTarget v = VDecode uLevel v
       
+      -- TODO : check the "hardcoded" eliminator type more carefuly
       vElimTyBody =
         VPi "P" vPTy $ \vP ->
           
@@ -834,7 +829,7 @@ elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm =
                          vTargetExp = vTarget (vApp vP (VIn (VDPair "c" vc vPayload)))
                      in VPi "ih" vIhTy $ \_ -> vTargetExp
               
-              vMTy = VSmallPiE vTagTm (VLam "c" (\vc -> case uLevel of Just l -> VCode l (mBody vc); Nothing -> VCodeTp (mBody vc)))
+              vMTy = VSmallPiE vTagTm (VLam "c" (\vc -> VCode uLevel (mBody vc)))
           
           in VPi "m" vMTy $ \vM ->
                VPi "x" vDatatype $ \vX ->
@@ -844,6 +839,7 @@ elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm =
       
   in foldr (\((pName, _), pTyTm) acc -> Pi pName pTyTm acc) elimTyBodyTm (zip params pTyTms)
 
+-- Elaborates the eliminator term
 elabElimTm params (Lvl l_p) vDescSum =
   let 
       vElimTmBody =
@@ -870,11 +866,11 @@ infer cxt = \case
     go 0 (types cxt)
 
   RApp t u -> do
-    (t, tty) <- infer cxt t
+    (t', tty) <- infer cxt t
     case tty of
       VPi _ a b -> do
-        u <- check cxt u a
-        pure (App t u, b (evalTm (env cxt) u))
+        u' <- check cxt u a
+        pure (App t' u', b (evalTm (env cxt) u'))
       tty ->
         report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt tty
 
@@ -892,17 +888,17 @@ infer cxt = \case
       VTensor _ b  -> pure (Snd tTm, b)
       _ -> report cxt "Expected a pair for snd"
 
-  RLet x a t u -> do
-    a <- checkTy cxt a Nothing
-    let ~va = evalTy (env cxt) a
-    t <- check cxt t va
-    let ~vt = evalTm (env cxt) t
-    (u, uty) <- infer (define x vt va cxt) u  
-    pure (Let x a t u, uty)
+  RLet x aTm tTm uTm -> do
+    aTm' <- checkTy cxt aTm Omega
+    let ~va = evalTy (env cxt) aTm'
+    tTm' <- check cxt tTm va
+    let ~vt = evalTm (env cxt) tTm'
+    (uTm', uty) <- infer (define x vt va cxt) uTm  
+    pure (Let x aTm' tTm' uTm', uty)
 
-  RAt t i -> do
-    ty <- checkTy cxt t (Just i)
-    pure (Code i ty, VU i)
+  RAt t s -> do
+    ty <- checkTy cxt t s
+    pure (Code s ty, VU s)
 
   RData x params ty constrs u -> do
     (tyD, vTyD, uLevel) <- elabDataTy cxt params ty
@@ -926,9 +922,7 @@ infer cxt = \case
     let paramVars = [Var (Ix i) | i <- [n - 1, n - 2 .. 0]]
     let dLabelTy = DLabel (Data x paramVars) muTy 
     
-    let dCode = case uLevel of 
-                  Just l -> Code l dLabelTy
-                  Nothing -> CodeTp dLabelTy
+    let dCode = Code uLevel dLabelTy
     let term_D = foldr (\(p, _) acc -> Lam p acc) dCode params
     
     let tags = iterate SuccE ZeroE
@@ -962,7 +956,6 @@ infer cxt = \case
     pure (finalTm, uTy)
 
   RU {} -> report cxt "Can't infer type for universe"
-  RTp   -> report cxt "Can't infer type for sort Tp"
   RPi {} -> report cxt "Can't infer type for product type"
   RLam {} -> report cxt "Can't infer type for lambda expression."
 
@@ -1005,7 +998,6 @@ prettyTm = goTm where
     Snd t -> par p appp $ ("snd "++) . goTm atomp ns t
 
     Code i t -> ('[':).prettyTy letp ns t.(']':)
-    CodeTp t -> ('[':).prettyTy letp ns t.(']':)
 
     Let (fresh ns -> x) a t u ->
       par p letp $ ("let "++) . (x++) . (" : "++) . prettyTy letp ns a
@@ -1056,8 +1048,8 @@ prettyTy = goTy where
   
   goTy :: Int -> [Name] -> Ty -> ShowS
   goTy p ns = \case    
+    U Big -> ("Tp"++)
     U i -> par p appp $ ("U "++).(show i++)
-    Tp  -> ("Tp"++)
 
     Pi "_" a b -> par p pip $ goTy appp ns a . (" → "++) . goTy pip ("_":ns) b
 
@@ -1067,7 +1059,6 @@ prettyTy = goTy where
       goPi ns b = (". "++) . goTy pip ns b
 
     Decode i t -> ('<':).prettyTm letp ns t.('>':)
-    El t -> prettyTm p ns t
 
     Unit -> ("1"++)
 
@@ -1146,8 +1137,8 @@ pAtom :: Parser Raw
 pAtom =
       withPos (
             (RVar <$> pIdent)
-        <|> (RU <$> (pKeyword "U" *> decimal))
-        <|> (RTp <$ pKeyword "Tp")
+        <|> (RU . Sz <$> (pKeyword "U" *> decimal))
+        <|> (RU Big <$ pKeyword "Tp")
         <|> (ROne <$ symbol "*")
         <|> (RFst <$> (pKeyword "fst" *> pAtom))
         <|> (RSnd <$> (pKeyword "snd" *> pAtom))
@@ -1200,11 +1191,12 @@ funOrSpine = do
   sp <- pSpine
   res <- optional (symbol "@" *> decimal)
   let sp' = case res of
-              Just i -> RAt sp i
+              Just i -> RAt sp (Sz i)
               Nothing -> sp
   optional pArrow >>= \case
     Nothing -> pure sp'
     Just _  -> RPi "_" sp' <$> pRaw
+
 pLet = do
   pKeyword "let"
   x <- pBinder

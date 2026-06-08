@@ -3,6 +3,7 @@ data List (A : Tp) : Tp where {
   cons : A -> List A -> List A
 } ;
 
+-- should fail
 let ParadoxList : Tp = List Tp ;
 
 ParadoxList
