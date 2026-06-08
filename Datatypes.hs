@@ -601,7 +601,7 @@ coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
   _ -> 
     if convTy l sourceTy targetTy then
       pure m 
-    else report cxt "Error: Invalid coercion"
+    else report cxt ("Error: Invalid coercion " ++ showVTy cxt sourceTy ++ "\n \n to \n \n" ++ showVTy cxt targetTy)
 
 checkTy :: Cxt -> Raw -> Size -> M Ty
 checkTy cxt t size = case t of
@@ -688,7 +688,7 @@ isRec d (RApp f _) = isRec d f
 isRec d _ = False
 
 
--- Function to handle "infinite" recursive definitions, like ex9
+-- Function to handle "infinite" recursive definitions, like ex7
 -- TODO : check this more carefuly
 isInfRec :: Name -> Raw -> Bool
 isInfRec d = \case
@@ -737,7 +737,7 @@ buildParamCxt c ((p, pTy):ps) = do
 elabTags :: [(Name, Raw)] -> Tm
 elabTags = foldr (\(cName, _) acc -> ConsE cName acc) NilE
 
--- Elaborates the description associated to a raw term (rule d)
+-- Elaborates the description associated to a raw term (rule e)
 elabConstrDesc :: Name -> Cxt -> Raw -> M Desc
 elabConstrDesc dName c = \case
   RSrcPos pos t -> elabConstrDesc dName (c {pos = pos}) t 
@@ -766,6 +766,8 @@ elabFullDesc dName numParams tagTy tuple =
       descCall = DescCall (Data dName paramVars) switchTm
   in DescSum "c" tagTy descCall
 
+
+-- Elaborate constructor
 elabConstrTm :: Name -> Name -> [(Name, Raw)] -> Raw -> Tm -> Tm
 elabConstrTm dName cName params cTyRaw cTag =
   let getArgs (RSrcPos _ t) = getArgs t
@@ -774,20 +776,22 @@ elabConstrTm dName cName params cTyRaw cTag =
       args = getArgs cTyRaw
       numArgs = length args
       
-      -- TODO : Check this more carefuly
-      buildPayload (RSrcPos _ t) idx = buildPayload t idx
-      buildPayload (RPi y a b) idx =
+      -- Rule (d)
+      elabArg (RSrcPos _ t) idx = elabArg t idx
+      elabArg (RPi y a b) idx =
         if isRec dName a || isInfRec dName a then
-          Pair (Var (Ix idx)) (buildPayload b (idx - 1))
+          Pair (Var (Ix idx)) (elabArg b (idx - 1))
         else
-          DPair y (Var (Ix idx)) (buildPayload b (idx - 1))
-      buildPayload _ _ = One
+          DPair y (Var (Ix idx)) (elabArg b (idx - 1))
+      elabArg _ _ = One
       
-      payload = buildPayload cTyRaw (numArgs - 1)
+      payload = elabArg cTyRaw (numArgs - 1)
       inner = ConLabel cName (In (DPair "c" cTag payload))
       body = foldr Lam inner args
   in foldr (\(p, _) acc -> Lam p acc) body params
 
+
+-- Elaborates all the constructors
 elabConstrs :: Name -> [(Name, Raw)] -> Cxt -> [((Name, Raw), Tm)] -> M (Cxt, Tm -> Tm, [(Name, Ty, Tm)])
 elabConstrs dName params c [] = pure (c, id, [])
 elabConstrs dName params c (((cName, cTyRaw), cTag) : rest) = do
@@ -804,32 +808,33 @@ elabConstrs dName params c (((cName, cTyRaw), cTag) : rest) = do
   pure (cFinal, \body -> Let cName cTyTm term (wrapLet body), (cName, cTyTm, term) : constrsData)
 
 -- Elaborates the eliminator type
-elabElimTy :: Size -> Name -> [(Name, Raw)] -> [Ty] -> Lvl -> VTm -> VTm -> Ty
-elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm =
+elabElimTy :: Size -> Name -> [(Name, Raw)] -> [Ty] -> Lvl -> VTm -> VTm -> VTm -> Ty
+elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm vTermD =
   let n = length params
       
       vParams = [VVar (Lvl i) | i <- [l_p - n .. l_p - 1]]
-      vDatatypeCode = foldl vApp (VVar (Lvl (l_p - n - 1))) vParams
+      vDatatypeCode = foldl vApp vTermD vParams      
       
       vDatatype = VDecode uLevel vDatatypeCode
       
-      vPTy = VPi "x" vDatatype (\_ -> VU uLevel)
-      vTarget v = VDecode uLevel v
+      vPTy = VPi "x" vDatatype (\_ -> VU Omega)
+      vTarget v = VDecode Omega v
       
       -- TODO : check the "hardcoded" eliminator type more carefuly
+      -- I have put Omega to allow large elimination, should we ?
       vElimTyBody =
         VPi "P" vPTy $ \vP ->
           
           let mBody vc =
                 let vDesc_c = VDescCall (VData dName vParams) (VSwitch vTuple vc)
-                    vPayloadTy = VExt vDesc_c vDatatype
-                in VPi "payload" vPayloadTy $ \vPayload ->
+                    vFuncTy = VExt vDesc_c vDatatype
+                in VPi "p" vFuncTy $ \vFunc ->
                      
-                     let vIhTy = VSquare vDesc_c (\vx -> vTarget (vApp vP vx)) vPayload
-                         vTargetExp = vTarget (vApp vP (VIn (VDPair "c" vc vPayload)))
+                     let vIhTy = VSquare vDesc_c (\vx -> vTarget (vApp vP vx)) vFunc
+                         vTargetExp = vTarget (vApp vP (VIn (VDPair "c" vc vFunc)))
                      in VPi "ih" vIhTy $ \_ -> vTargetExp
               
-              vMTy = VSmallPiE vTagTm (VLam "c" (\vc -> VCode uLevel (mBody vc)))
+              vMTy = VSmallPiE vTagTm (VLam "c" (\vc -> VCode Omega (mBody vc)))
           
           in VPi "m" vMTy $ \vM ->
                VPi "x" vDatatype $ \vX ->
@@ -900,6 +905,8 @@ infer cxt = \case
     ty <- checkTy cxt t s
     pure (Code s ty, VU s)
 
+  ROne -> pure (One, VUnit)
+
   RData x params ty constrs u -> do
     (tyD, vTyD, uLevel) <- elabDataTy cxt params ty
     
@@ -936,11 +943,11 @@ infer cxt = \case
     let vTagTm = evalTm (env cxt_params) tagTm
     let vDescSum = evalDesc (env cxt_params) descSum
     
-    let elimTyFull = elabElimTy uLevel x params pTyTms (lvl cxt_params) vTuple vTagTm
+    let elimTyFull = elabElimTy uLevel x params pTyTms (lvl cxt_params) vTuple vTagTm vTermD
     let elimTmFull = elabElimTm params (lvl cxt_params) vDescSum
 
-    let vElimTy = evalTy (env cxt_initial_constrs) elimTyFull
-    let vElimTm = evalTm (env cxt_initial_constrs) elimTmFull
+    let vElimTy = evalTy (env cxt) elimTyFull
+    let vElimTm = evalTm (env cxt) elimTmFull
 
     let elimName = "elim" ++ x
     let cxt_final = define elimName vElimTm vElimTy cxt_with_constrs
@@ -955,6 +962,7 @@ infer cxt = \case
                   Let elimName nfElimTy nfElimTm uTm
     pure (finalTm, uTy)
 
+  RPair {} -> report cxt "Can't infer type for Pair"
   RU {} -> report cxt "Can't infer type for universe"
   RPi {} -> report cxt "Can't infer type for product type"
   RLam {} -> report cxt "Can't infer type for lambda expression."

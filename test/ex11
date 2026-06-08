@@ -1,0 +1,135 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data List (A : Tp) : Tp where {
+  nil : List A ;
+  cons : A -> List A -> List A
+} ;
+
+data Category : Tp where {
+  mkCat : (Obj : Tp) ->
+          (Hom : Obj -> Obj -> Tp) ->
+          (id : (x : Obj) -> Hom x x) ->
+          (comp : (x : Obj) -> (y : Obj) -> (z : Obj) -> Hom y z -> Hom x y -> Hom x z) ->
+          Category
+} ;
+
+let ObjOf : Category -> Tp = \C.
+  elimCategory (\_. Tp)
+    < \p ihs. fst p , * > 
+    C ;
+
+let HomOf : (C : Category) -> ObjOf C -> ObjOf C -> Tp = \C.
+  elimCategory (\CIn. ObjOf CIn -> ObjOf CIn -> Tp)
+    < \p ihs. fst (snd p) , * > 
+    C ;
+
+data Functor (C : Category) (D : Category) : Tp where {
+  mkFunctor : (FObj : ObjOf C -> ObjOf D) ->
+              (FHom : (x : ObjOf C) -> (y : ObjOf C) -> HomOf C x y -> HomOf D (FObj x) (FObj y)) ->
+              Functor C D
+} ;
+
+let FObjOf : (C : Category) -> (D : Category) -> Functor C D -> ObjOf C -> ObjOf D = \C D F.
+  elimFunctor C D (\FIn. ObjOf C -> ObjOf D)
+    < \p ihs. fst p , * > 
+    F ;
+
+let FHomOf : (C : Category) -> (D : Category) -> (F : Functor C D) -> 
+             (x : ObjOf C) -> (y : ObjOf C) -> HomOf C x y -> HomOf D (FObjOf C D F x) (FObjOf C D F y) = \C D F.
+  let Motive : Functor C D -> Tp = \Fin. (x : ObjOf C) -> (y : ObjOf C) -> HomOf C x y -> HomOf D (FObjOf C D Fin x) (FObjOf C D Fin y) ;
+  elimFunctor C D Motive
+    < \p ihs. \x y hom. (fst (snd p)) x y hom , * > 
+    F ;
+
+data NatTrans (C : Category) (D : Category) (F : Functor C D) (G : Functor C D) : Tp where {
+  mkNatTrans : (cmp : (x : ObjOf C) -> HomOf D (FObjOf C D F x) (FObjOf C D G x)) ->
+               NatTrans C D F G
+} ;
+
+let CmpOf : (C : Category) -> (D : Category) -> (F : Functor C D) -> (G : Functor C D) -> 
+            (N : NatTrans C D F G) -> (x : ObjOf C) -> HomOf D (FObjOf C D F x) (FObjOf C D G x) = \C D F G N.
+  let Motive : NatTrans C D F G -> Tp = \Nin. (x : ObjOf C) -> HomOf D (FObjOf C D F x) (FObjOf C D G x) ;
+  elimNatTrans C D F G Motive
+    < \p ihs. fst p , * > 
+    N ;
+
+let IdFunctor : (C : Category) -> Functor C C = \C.
+  mkFunctor C C (\x. x) (\x y f. f) ;
+
+let CompFunctor : (C : Category) -> (D : Category) -> (E : Category) -> 
+                  Functor D E -> Functor C D -> Functor C E = \C D E F G.
+  mkFunctor C E
+    (\x. FObjOf D E F (FObjOf C D G x))
+    (\x y f. FHomOf D E F (FObjOf C D G x) (FObjOf C D G y) (FHomOf C D G x y f)) ;
+
+data MonadCat (C : Category) : Tp where {
+  mkMonadCat : (T : Functor C C) ->
+               (eta : NatTrans C C (IdFunctor C) T) ->
+               (mu  : NatTrans C C (CompFunctor C C C T T) T) ->
+               MonadCat C
+} ;
+
+let MuOf : (C : Category) -> (M : MonadCat C) -> 
+           NatTrans C C (CompFunctor C C C  (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> M)
+                                            (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> M))
+                        (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> M) = \C M.
+  elimMonadCat C (\MIn. NatTrans C C (CompFunctor C C C (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> MIn)
+                                                        (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> MIn))
+                                      (elimMonadCat C (\_. Functor C C) <\p i. fst p , *> MIn))
+    < \p ihs. fst (snd (snd p)) , * > 
+    M ;
+
+
+let TypeCat : Category =
+  mkCat (U 0)
+        (\A B. A -> B)
+        (\A x. x)
+        (\A B C g f x. g (f x)) ;
+
+
+let listFmap : (A : U 0) -> (B : U 0) -> (A -> B) -> List A @ 0 -> List B @ 0 = \A B f l.
+  elimList A (\_. List B @ 0)
+    < \p ihs. nil B ,
+    < \p ihs. cons B (f (fst p)) (fst ihs) ,
+    * > >
+    l ;
+
+let ListF : Functor TypeCat TypeCat =
+  mkFunctor TypeCat TypeCat
+    (\A. List A @ 0)
+    (\A B f. listFmap A B f) ;
+
+let ListEta : NatTrans TypeCat TypeCat (IdFunctor TypeCat) ListF =
+  mkNatTrans TypeCat TypeCat (IdFunctor TypeCat) ListF 
+    (\A x. cons A x (nil A)) ;
+
+let append : (B : U 0) -> List B @ 0 -> List B @ 0 -> List B @ 0 = \B l1 l2.
+  elimList B (\_. List B @ 0)
+    < \p ihs. l2 , < \p ihs. cons B (fst p) (fst ihs) , * > > l1 ;
+
+let concat : (A : U 0) -> List (List A @ 0) @ 0 -> List A @ 0 = \A ll.
+  elimList (List A @ 0) (\_. List A @ 0)
+    < \p ihs. nil A , < \p ihs. append A (fst p) (fst ihs) , * > > ll ;
+
+let ListMu : NatTrans TypeCat TypeCat (CompFunctor TypeCat TypeCat TypeCat ListF ListF) ListF =
+  mkNatTrans TypeCat TypeCat (CompFunctor TypeCat TypeCat TypeCat ListF ListF) ListF 
+    (\A. concat A) ;
+
+let CategoricalListMonad : MonadCat TypeCat =
+  mkMonadCat TypeCat ListF ListEta ListMu ;
+
+let pureConcat : (A : U 0) -> List (List A @ 0) @ 0 -> List A @ 0 = \A.
+  CmpOf TypeCat TypeCat (CompFunctor TypeCat TypeCat TypeCat ListF ListF) ListF 
+        (MuOf TypeCat CategoricalListMonad) A ;
+
+let nestedList : List (List Nat @ 0) @ 0 =
+  cons (List Nat @ 0)
+       (cons Nat zero (nil Nat))
+       (cons (List Nat @ 0)
+             (cons Nat (succ zero) (nil Nat))
+             (nil (List Nat @ 0))) ;
+
+pureConcat Nat nestedList

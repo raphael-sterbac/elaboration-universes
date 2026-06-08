@@ -1,0 +1,68 @@
+data Nat : Tp where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data List (A : Tp) : Tp where {
+  nil : List A ;
+  cons : A -> List A -> List A
+} ;
+
+data Id (A : Tp) : Tp where {
+  mkId : A -> Id A
+} ;
+
+data Monad : Tp where {
+  mkMonad : (M : U 0 -> U 0) ->
+            (ret : (A : U 0) -> A -> M A) ->
+            (bind : (A : U 0) -> (B : U 0) -> M A -> (A -> M B) -> M B) ->
+            Monad
+} ;
+
+let SmallMonad : U 1 = Monad @ 1 ;
+
+let listRet : (A : U 0) -> A -> List A @ 0 = \A x.
+  cons A x (nil A) ;
+
+let append : (B : U 0) -> List B @ 0 -> List B @ 0 -> List B @ 0 = \B l1 l2.
+  elimList B (\_. List B @ 0)
+    < \p ihs. l2 ,
+    < \p ihs. cons B (fst p) (fst ihs) ,
+    * > >
+    l1 ;
+
+let listBind : (A : U 0) -> (B : U 0) -> List A @ 0 -> (A -> List B @ 0) -> List B @ 0 = \A B l f.
+  elimList A (\_. List B @ 0)
+    < \p ihs. nil B ,
+    < \p ihs. append B (f (fst p)) (fst ihs) ,
+    * > >
+    l ;
+
+let ListMonad : SmallMonad = mkMonad (\A. List A @ 0) listRet listBind ;
+
+let idRet : (A : U 0) -> A -> Id A @ 0 = \A x.
+  mkId A x ;
+
+let idBind : (A : U 0) -> (B : U 0) -> Id A @ 0 -> (A -> Id B @ 0) -> Id B @ 0 = \A B i f.
+  elimId A (\_. Id B @ 0)
+    < \p ihs. f (fst p) ,
+    * >
+    i ;
+
+let IdMonad : SmallMonad = mkMonad (\A. Id A @ 0) idRet idBind ;
+
+let MonadList : U 2 = List SmallMonad @ 2 ;
+
+let myList : MonadList = 
+  cons SmallMonad ListMonad (cons SmallMonad IdMonad (nil SmallMonad)) ;
+
+let extractFirst : MonadList -> SmallMonad = \r.
+  elimList SmallMonad (\_. SmallMonad)
+    < \p ihs. IdMonad , 
+    < \p ihs. fst p ,
+    * > >
+    r ;
+
+let myMonad : SmallMonad = extractFirst myList ;
+
+myMonad
