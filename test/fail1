@@ -9,6 +9,6 @@ data BadList : Tp where {
 } ;
 
 -- should fail
-let illegalType : U 0 = BadList @ 0 ;
+let illegalType : U 0 = BadList;
 
 illegalType

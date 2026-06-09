@@ -13,56 +13,54 @@ data Id (A : Tp) : Tp where {
 } ;
 
 data Monad : Tp where {
-  mkMonad : (M : U 0 -> U 0) ->
+  mkMonad : (M : U 0 -> U 5) ->
             (ret : (A : U 0) -> A -> M A) ->
             (bind : (A : U 0) -> (B : U 0) -> M A -> (A -> M B) -> M B) ->
             Monad
 } ;
 
-let SmallMonad : U 1 = Monad @ 1 ;
-
-let listRet : (A : U 0) -> A -> List A @ 0 = \A x.
+let listRet : (A : U 2) -> A -> List A = \A x.
   cons A x (nil A) ;
 
-let append : (B : U 0) -> List B @ 0 -> List B @ 0 -> List B @ 0 = \B l1 l2.
-  elimList B (\_. List B @ 0)
+let append : (B : U 2) -> List B -> List B -> List B  = \B l1 l2.
+  elimList B (\_. List B )
     < \p ihs. l2 ,
     < \p ihs. cons B (fst p) (fst ihs) ,
     * > >
     l1 ;
 
-let listBind : (A : U 0) -> (B : U 0) -> List A @ 0 -> (A -> List B @ 0) -> List B @ 0 = \A B l f.
-  elimList A (\_. List B @ 0)
+let listBind : (A : U 2) -> (B : U 2) -> List A  -> (A -> List B ) -> List B  = \A B l f.
+  elimList A (\_. List B )
     < \p ihs. nil B ,
     < \p ihs. append B (f (fst p)) (fst ihs) ,
     * > >
     l ;
 
-let ListMonad : SmallMonad = mkMonad (\A. List A @ 0) listRet listBind ;
+let ListMonad : Monad = mkMonad (\A. List A) listRet listBind ;
 
-let idRet : (A : U 0) -> A -> Id A @ 0 = \A x.
+let idRet : (A : U 2) -> A -> Id A  = \A x.
   mkId A x ;
 
-let idBind : (A : U 0) -> (B : U 0) -> Id A @ 0 -> (A -> Id B @ 0) -> Id B @ 0 = \A B i f.
-  elimId A (\_. Id B @ 0)
+let idBind : (A : U 2) -> (B : U 2) -> Id A  -> (A -> Id B ) -> Id B  = \A B i f.
+  elimId A (\_. Id B )
     < \p ihs. f (fst p) ,
     * >
     i ;
 
-let IdMonad : SmallMonad = mkMonad (\A. Id A @ 0) idRet idBind ;
+let IdMonad : Monad = mkMonad (\A. Id A ) idRet idBind ;
 
-let MonadList : U 2 = List SmallMonad @ 2 ;
+let MonadList : Tp = List Monad ;
 
 let myList : MonadList = 
-  cons SmallMonad ListMonad (cons SmallMonad IdMonad (nil SmallMonad)) ;
+  cons Monad ListMonad (cons Monad IdMonad (nil Monad)) ;
 
-let extractFirst : MonadList -> SmallMonad = \r.
-  elimList SmallMonad (\_. SmallMonad)
+let extractFirst : MonadList -> Monad = \r.
+  elimList Monad (\_. Monad)
     < \p ihs. IdMonad , 
     < \p ihs. fst p ,
     * > >
     r ;
 
-let myMonad : SmallMonad = extractFirst myList ;
+let myMonad : Monad = extractFirst myList ;
 
 myMonad

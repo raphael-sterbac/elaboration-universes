@@ -88,9 +88,8 @@ let TypeCat : Category =
         (\A x. x)
         (\A B C g f x. g (f x)) ;
 
-
-let listFmap : (A : U 0) -> (B : U 0) -> (A -> B) -> List A @ 0 -> List B @ 0 = \A B f l.
-  elimList A (\_. List B @ 0)
+let listFmap : (A : U 0) -> (B : U 0) -> (A -> B) -> List A  -> List B  = \A B f l.
+  elimList A (\_. List B )
     < \p ihs. nil B ,
     < \p ihs. cons B (f (fst p)) (fst ihs) ,
     * > >
@@ -98,19 +97,19 @@ let listFmap : (A : U 0) -> (B : U 0) -> (A -> B) -> List A @ 0 -> List B @ 0 = 
 
 let ListF : Functor TypeCat TypeCat =
   mkFunctor TypeCat TypeCat
-    (\A. List A @ 0)
+    (\A. List A )
     (\A B f. listFmap A B f) ;
 
 let ListEta : NatTrans TypeCat TypeCat (IdFunctor TypeCat) ListF =
   mkNatTrans TypeCat TypeCat (IdFunctor TypeCat) ListF 
     (\A x. cons A x (nil A)) ;
 
-let append : (B : U 0) -> List B @ 0 -> List B @ 0 -> List B @ 0 = \B l1 l2.
-  elimList B (\_. List B @ 0)
+let append : (B : U 0) -> List B  -> List B  -> List B  = \B l1 l2.
+  elimList B (\_. List B )
     < \p ihs. l2 , < \p ihs. cons B (fst p) (fst ihs) , * > > l1 ;
 
-let concat : (A : U 0) -> List (List A @ 0) @ 0 -> List A @ 0 = \A ll.
-  elimList (List A @ 0) (\_. List A @ 0)
+let concat : (A : U 0) -> List (List A )  -> List A  = \A ll.
+  elimList (List A ) (\_. List A )
     < \p ihs. nil A , < \p ihs. append A (fst p) (fst ihs) , * > > ll ;
 
 let ListMu : NatTrans TypeCat TypeCat (CompFunctor TypeCat TypeCat TypeCat ListF ListF) ListF =
@@ -120,15 +119,15 @@ let ListMu : NatTrans TypeCat TypeCat (CompFunctor TypeCat TypeCat TypeCat ListF
 let CategoricalListMonad : MonadCat TypeCat =
   mkMonadCat TypeCat ListF ListEta ListMu ;
 
-let pureConcat : (A : U 0) -> List (List A @ 0) @ 0 -> List A @ 0 = \A.
+let pureConcat : (A : U 0) -> List (List A )  -> List A  = \A.
   CmpOf TypeCat TypeCat (CompFunctor TypeCat TypeCat TypeCat ListF ListF) ListF 
         (MuOf TypeCat CategoricalListMonad) A ;
 
-let nestedList : List (List Nat @ 0) @ 0 =
-  cons (List Nat @ 0)
+let nestedList : List (List Nat )  =
+  cons (List Nat )
        (cons Nat zero (nil Nat))
-       (cons (List Nat @ 0)
+       (cons (List Nat )
              (cons Nat (succ zero) (nil Nat))
-             (nil (List Nat @ 0))) ;
+             (nil (List Nat ))) ;
 
 pureConcat Nat nestedList

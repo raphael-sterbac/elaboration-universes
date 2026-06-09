@@ -3,9 +3,9 @@ data List (A : Tp) : Tp where {
   cons : A -> List A -> List A
 } ;
 
-let validTypeList : U 1 = List (U 0) @ 1 ;
+let validTypeList : U 1 = List (U 0);
 
 -- should fail
-let invalidTypeList : U 0 = List (U 0) @ 0 ;
+let invalidTypeList : U 0 = List (U 0);
 
 validTypeList

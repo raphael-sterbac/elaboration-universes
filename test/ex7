@@ -8,6 +8,6 @@ data InfTree (A : Tp) : Tp where {
   node : (Nat -> InfTree A) -> InfTree A
 } ;
 
-let myTree : U 0 = InfTree Nat @ 0 ;
+let myTree : U 0 = InfTree Nat;
 
 myTree

@@ -9,6 +9,6 @@ data BadTree (A : Tp) : Tp where {
 } ;
 
 -- should fail
-let trapTree : U 0 = BadTree Nat @ 0 ;
+let trapTree : U 0 = BadTree Nat ;
 
 trapTree

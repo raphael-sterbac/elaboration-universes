@@ -12,7 +12,7 @@ let TypeList : Tp = List (U 0) ;
 
 let types1 : TypeList = cons (U 0) Nat (nil (U 0)) ;
 
-let types2 : TypeList = cons (U 0) (List Nat @ 0) types1 ;
+let types2 : TypeList = cons (U 0) (List Nat) types1 ;
 
 let getHead : TypeList -> U 0 = \l.
   elimList (U 0) (\_. U 0)

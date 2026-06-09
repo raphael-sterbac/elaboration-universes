@@ -56,7 +56,6 @@ data Raw
   | RPi Name Raw Raw
   | RPair Raw Raw
   | ROne
-  | RAt Raw Size
   | RFst Raw
   | RSnd Raw
   | RLet Name Raw Raw Raw
@@ -611,11 +610,6 @@ checkTy cxt t size = case t of
     then pure $ U s'
     else report cxt ("Size issue: U " ++ show s' ++ " is too large to fit in " ++ show size)
 
-  RAt t s' -> 
-    if s' > size 
-    then report cxt ("Size annotation @" ++ show s' ++ " is too large for expected size " ++ show size)
-    else checkTy cxt t s'
-
   RPi x a b -> do
     a' <- checkTy cxt a size
     let cxt' = bind x (evalTy (env cxt) a') cxt
@@ -900,10 +894,6 @@ infer cxt = \case
     let ~vt = evalTm (env cxt) tTm'
     (uTm', uty) <- infer (define x vt va cxt) uTm  
     pure (Let x aTm' tTm' uTm', uty)
-
-  RAt t s -> do
-    ty <- checkTy cxt t s
-    pure (Code s ty, VU s)
 
   ROne -> pure (One, VUnit)
 
@@ -1197,13 +1187,9 @@ pPi = do
 
 funOrSpine = do
   sp <- pSpine
-  res <- optional (symbol "@" *> decimal)
-  let sp' = case res of
-              Just i -> RAt sp (Sz i)
-              Nothing -> sp
   optional pArrow >>= \case
-    Nothing -> pure sp'
-    Just _  -> RPi "_" sp' <$> pRaw
+    Nothing -> pure sp
+    Just _  -> RPi "_" sp <$> pRaw
 
 pLet = do
   pKeyword "let"
