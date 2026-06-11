@@ -541,19 +541,9 @@ isSmall cxt i = \case
       isSmall cxt i a
       isSmall cxt i (b (VVar (lvl cxt)))
 
-  -- TODO : This is a bit weird, shouldn't we "evaluate" in evalTy ?
-  VSigma _ a b -> case a of
-      VEnumT tags -> do
-          let checkBranches t idx = case t of
-                VNilE -> pure ()
-                VConsE _ rest -> do
-                    isSmall cxt i (b idx)
-                    checkBranches rest (VSuccE idx)
-                _ -> report cxt "Cannot prove smallness: opaque enumeration tags"
-          checkBranches tags VZeroE
-      _ -> do
-          isSmall cxt i a
-          isSmall cxt i (b (VVar (lvl cxt)))
+  VSigma _ a b -> do
+      isSmall cxt i a
+      isSmall cxt i (b (VVar (lvl cxt)))
           
   VTensor a b -> do
       isSmall cxt i a
@@ -561,10 +551,7 @@ isSmall cxt i = \case
   VUnit -> pure ()
   VDLabel _ ty -> isSmall cxt i ty
   
-  VMu _ d -> do
-      let l = lvl cxt
-      let cxt' = bind "_" (VU i) cxt
-      isSmall cxt' i (applyExt d (VDecode i (VVar l)))
+  VMu _ d -> isDescSmall cxt i d
       
   VEnumU -> pure ()
   VEnumT _ -> pure ()
@@ -572,6 +559,36 @@ isSmall cxt i = \case
 
   VExt _ _ -> report cxt "Cannot prove smallness: opaque description extension"
   VSquare _ _ _ -> report cxt "Cannot prove smallness: opaque square"
+
+isDescSmall :: Cxt -> Size -> VDesc -> M ()
+isDescSmall cxt i = \case
+  VDescTensor d1 d2 -> do
+    isDescSmall cxt i d1
+    isDescSmall cxt i d2
+
+  VDescSum n a d -> do
+    isSmall cxt i a
+    isDescSmall cxt i (d (VVar (lvl cxt))) 
+
+  VDescProd n a d -> do
+    isSmall cxt i a
+    isDescSmall cxt i (d (VVar (lvl cxt))) 
+
+  VDescCall _ k -> case k of
+    VSwitch tuple _ -> isTupleSmall cxt i tuple
+    _ -> pure ()
+  
+  VDescUnit -> pure ()
+  VDescVar -> pure ()
+
+isTupleSmall :: Cxt -> Size -> VTm -> M ()
+isTupleSmall cxt i = \case
+  VPair (VDReturn d) rest -> do
+      isDescSmall cxt i d
+      isTupleSmall cxt i rest
+  VDReturn d -> isDescSmall cxt i d
+  VOne -> pure ()
+  _ -> pure ()
 
 coe :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
 coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
@@ -587,10 +604,7 @@ coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
     let env' = env cxt'
     let vu_x = evalTm env' u_x
     let vm = evalTm (env cxt) m
-    let vApp' = case vm of
-                VLam _ f -> f vu_x
-                _        -> VApp vm vu_x
-    let m_u_x = quoteTm l' vApp'
+    let m_u_x = quoteTm l' (vApp vm vu_x)
     
     n_x <- coe cxt' l' (b1 vu_x) (b2 (VVar l)) m_u_x
     
@@ -617,17 +631,14 @@ checkTy cxt t size = case t of
     pure $ Pi x a' b'
 
   _ -> do 
-    (tTm, aTy) <- infer cxt t
-    case aTy of
-      VU s' -> 
-        if s' <= size 
-        then pure (Decode s' tTm)
-        else do
-            let ty = Decode s' tTm
-            isSmall cxt size (evalTy (env cxt) ty)
-            pure ty
-        
-      _ -> report cxt "Elaboration error: Expected a small type"
+    (tTm, s) <- inferU cxt t
+    if s <= size then
+      pure (Decode s tTm)
+    else do
+      -- TODO : Is this always ok ?
+      let ty = Decode s tTm
+      isSmall cxt size (evalTy (env cxt) ty)
+      pure ty
     
 check :: Cxt -> Raw -> VTy -> M Tm
 check cxt t a = case (t, a) of
