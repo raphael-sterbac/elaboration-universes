@@ -1,4 +1,3 @@
-
 module Main where
 
 import Prelude hiding (lookup)
