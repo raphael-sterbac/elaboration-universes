@@ -5,10 +5,16 @@ to simplify the implementation, first described [here](https://www.jonmsterling.
 
 # File architecture
 
-The main file is `Main.hs`, and contains the implementation of a minimal type theory, with no fancy features to emphasize
+The file `Mimimal-Implementation.hs` contains the implementation of a minimal type theory, with no fancy features to emphasize
 the simplicity of the approach. 
 
-The file `Datatypes.hs` adds datatypes in the type theory, following Dagand's thesis *Cosmology of datatypes* and adapting it to the new system for universes.
+The files in `src/` form a more advanced implementation, adding datatypes to the type theory, following Dagand's thesis *Cosmology of datatypes* and adapting it to the new system for universes. The file architecture is the following:
+
+- `Main.hs`: main project file, calling the type-checking and evaluation function on the input
+- `Evaluation.hs`: semantic domain and normalisation-by-evaluation (NbE) of the type theory
+- `Conversion.hs`: Conversion checking (no holes and unification for simplicity)
+- `Elaboration.hs`: Elaboration algorithm, including elaboration of datatypes descriptions
+- `Parsing.hs` and `Printing.hs` : parsing and printing functions
 
 # Compiling the project
 

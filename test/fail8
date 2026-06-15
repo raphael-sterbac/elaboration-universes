@@ -1,0 +1,17 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data Bool : U 0 where {
+  true : Bool ;
+  false : Bool
+} ;
+
+
+-- Should fail (strict positivity)
+data Strange : Tp where {
+  strange : ((Bool → Strange) → (Nat → Strange)) → Strange
+} ;
+
+strange

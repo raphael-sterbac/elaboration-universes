@@ -1,0 +1,7 @@
+-- should fail (strict positivity)
+
+data Bad : Tp where {
+    bad : (Bad → Bad) → Bad
+} ;
+
+bad

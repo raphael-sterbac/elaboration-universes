@@ -2,14 +2,24 @@ cabal-version: 1.12
 
 name:           implem-fuss-free
 version:        0.1.0.0
+description:    Implementation of MLTT with a cumulative hierarchy of universes 
+category:       Language
+author:         Raphaël Sterbac
+maintainer:     raphael.sterbac@ens-paris-saclay.Fr
 build-type:     Simple
 
-
 executable implem-fuss-free
-  main-is: Datatypes.hs
+  main-is: Main.hs
   hs-source-dirs:
-      ./.
-  default-extensions: BlockArguments DerivingVia LambdaCase NoMonomorphismRestriction OverloadedStrings PatternSynonyms RecordWildCards StandaloneDeriving Strict TupleSections ViewPatterns
+      src/
+  other-modules:
+      Conversion
+      Elaboration
+      Evaluation
+      Parsing
+      Printing
+      Syntax
+  default-extensions: BlockArguments DerivingVia LambdaCase NoMonomorphismRestriction OverloadedStrings PatternSynonyms RecordWildCards StandaloneDeriving Strict TupleSections ViewPatterns 
   ghc-options: -Wall -Wno-name-shadowing -Wno-missing-signatures -Wno-unused-do-bind -Wno-unused-matches -O
   build-depends:
       base >=4.7 && <5
