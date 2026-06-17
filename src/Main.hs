@@ -4,6 +4,7 @@ import Prelude hiding (lookup)
 import System.Environment (getArgs)
 import Text.Megaparsec
 import Text.Printf
+import System.Exit (exitFailure, exitSuccess)
 
 import Evaluation
 import Elaboration
@@ -44,17 +45,22 @@ main = do
       src <- readFile filepath
       
       case parse pSrc filepath src of
-        Left e -> putStrLn $ errorBundlePretty e
+        Left e -> do
+          putStrLn $ errorBundlePretty e
+          exitFailure  
         Right tm -> do
           
           let cxt = emptyCxt (initialPos filepath)
           case infer cxt tm of
-            Left err -> displayError src err
+            Left err -> do 
+              displayError src err
+              exitFailure 
             Right (t, a) -> case mode of
               "nf" -> do
                 putStrLn $ showTm0 $ nf [] t
                 putStrLn "  :"
                 putStrLn $ showTy0 $ quoteTy 0 a
+                exitSuccess
               "elab" -> putStrLn $ showTm0 $ t
               "type" -> putStrLn $ showTy0 $ quoteTy 0 a
               _      -> pure ()

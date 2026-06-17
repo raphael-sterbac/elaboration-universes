@@ -29,3 +29,9 @@ You can then run several tests provided in the directory `test/` using the follo
 ```
 cabal exec implem-fuss-free -- nf test/[choose a test]
 ```
+
+If you want to run all the test in a batch, you can use the helper bash script :
+
+```
+./test.sh
+```
