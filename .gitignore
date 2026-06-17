@@ -1,6 +1,3 @@
-# =========================
-# Haskell / GHC build files
-# =========================
 dist/
 dist-*
 dist-newstyle/
@@ -24,17 +21,6 @@ cabal.project.local
 cabal.project.local~
 .HTF/
 .ghc.environment.*
-
-# =========================
-# Executables
-# =========================
-# Ignore the generated binary (adjust if your executable has a different name)
-elabzoo-univ-lifts
-*.exe
-
-# =========================
-# Editor / OS files
-# =========================
 *~
 *.swp
 *.swo
@@ -49,6 +35,4 @@ Icon
 .idea/
 *.iml
 
-Andras/
 Misc
-model

@@ -1,4 +1,3 @@
-
 data Category : U 1 where {
   mkCat : (Obj : U 1) ->
           (Hom : Obj -> Obj -> U 1) ->

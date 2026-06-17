@@ -165,7 +165,6 @@ checkTy cxt t size = case t of
     if s <= size then
       pure (Decode s tTm)
     else do
-      -- TODO : Check that we are not inferring to much (typical ambiguity etc...)
       let ty = Decode s tTm
       isSmall cxt size (evalTy (env cxt) ty)
       pure ty
@@ -221,15 +220,16 @@ check cxt t a = case (t, a) of
 -- Elaborates the type of the big Pi of the parameters, returns the type, its semantics and its size (first premise of rule a)
 elabDataTy :: Cxt -> [(Name, Raw)] -> Raw -> M (Ty, VTy, Size)
 elabDataTy cxt params ty = do
-  let tyD_raw = foldr (\(p, pTy) acc -> RPi p pTy acc) ty params
-  tyD <- checkTy cxt tyD_raw Omega
-  let vTyD = evalTy (env cxt) tyD
+  let tyParams_raw = foldr (\(p, pTy) acc -> RPi p pTy acc) ty params
+  tyParams <- checkTy cxt tyParams_raw Omega
+  let vTyParams = evalTy (env cxt) tyParams
 
   let getSize (U s) = s
       getSize (Decode s _) = s
       getSize (Pi _ _ b) = getSize b
       getSize _ = Big
-  pure (tyD, vTyD, getSize tyD)
+
+  pure (tyParams, vTyParams, getSize tyParams)
 
 -- Adds all the parameters in the context (Binding in the second premise of rule a)
 buildParamCxt :: Cxt -> [(Name, Raw)] -> M (Cxt, [Ty])
@@ -268,7 +268,7 @@ checkInfRec dName c = \case
   _ -> pure Nothing
 
 -- TODO : rethink this function, probably we can simplify it
--- Elaborates the description associated to a raw term : rule (b)
+-- Elaborates the description associated to a raw term : second premise of rule (b)
 elabConstrDesc :: Name -> Cxt -> Raw -> M Desc
 elabConstrDesc dName c = \case
   RSrcPos pos t -> elabConstrDesc dName (c {pos = pos}) t
@@ -438,10 +438,10 @@ infer cxt = \case
   ROne -> pure (One, VUnit)
 
   RData x params ty constrs u -> do
-    -- First premise of rule (a)
-    (tyD, vTyD, uLevel) <- elabDataTy cxt params ty
+    -- First premise of rule (a) : elaborate the big Pi of parameters
+    (tyParams, vTyParams, uLevel) <- elabDataTy cxt params ty
 
-    -- Binding of the second premise of rule (a)
+    -- Binding the Pi of parameters : in the second premise of rule (a)
     (cxt_params, pTyTms) <- buildParamCxt cxt params
 
     let constrsList = NE.toList constrs
@@ -450,23 +450,28 @@ infer cxt = \case
     let vTagTy = evalTy (env cxt_params) tagTy
     let cxt_with_c = bind "c" vTagTy cxt_params
 
+    -- Elaborate the list of descriptions corresponding to the type of each constructor
     desc_list <- forM constrsList $ \(_, cTyRaw) ->
                      elabConstrDesc x cxt_with_c cTyRaw
 
+    -- Bundles the previous list in a single description corresponding to the datatype
     let n = length params
     let tuple = foldr (Pair . DReturn) One desc_list
     let descSum = elabFullDesc x n tagTy tuple
 
+    -- Take the initial algebra of this description, and bundle it in a label type
     let muTy = Mu descSum
     let paramVars = [Var (Ix i) | i <- [n - 1, n - 2 .. 0]]
     let dLabelTy = DLabel (Data x paramVars) muTy
 
+    -- We take the code of this type and put in in a lambda to get the conclusion of rule (a)
     let dCode = Code uLevel dLabelTy
     let term_D = foldr (\(p, _) acc -> Lam p acc) dCode params
 
+    -- We add it to the context !
     let tags = iterate SuccE ZeroE
     let vTermD = evalTm (env cxt) term_D
-    let cxt_initial_constrs = define x vTermD vTyD cxt
+    let cxt_initial_constrs = define x vTermD vTyParams cxt
 
     (cxt_with_constrs, wrapLets, constrsData) <- elabConstrs x params cxt_initial_constrs (zip constrsList tags)
 
@@ -489,7 +494,7 @@ infer cxt = \case
     let nfElimTy = quoteTy (lvl cxt_with_constrs) vElimTy
     let nfElimTm = quoteTm (lvl cxt_with_constrs) vElimTm
 
-    let finalTm = Let x tyD term_D $
+    let finalTm = Let x tyParams term_D $
                   wrapLets $
                   Let elimName nfElimTy nfElimTm uTm
     pure (finalTm, uTy)
