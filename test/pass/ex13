@@ -76,15 +76,13 @@ let CompFunctor : (C : Category) -> (D : Category) -> (E : Category) ->
     (\x. FObjOf D E F (FObjOf C D G x))
     (\x y f. FHomOf D E F (FObjOf C D G x) (FObjOf C D G y) (FHomOf C D G x y f)) ;
 
-let SmallCat : U 1 = Category @ 0 ;
-
 let CatOfSmallCats : Category =
-  mkCat SmallCat
+  mkCat (Category @ 0)
         (\C D. Functor C D )
         (\C. IdFunctor C )
         (\C D E G F. CompFunctor C D E G F ) ;
 
-let TypeCat : SmallCat =
+let TypeCat : Category @ 0 =
   mkCat (U 0)
         (\A B. A -> B)
         (\A x. x)
@@ -96,12 +94,12 @@ let Op : (C : Category) -> Category = \C.
         (\x. IdOf C x)                  
         (\x y z f g. CompOf C z y x g f) ;
 
-let HomFunctor : (C : SmallCat) -> ObjOf C -> Functor (Op C) TypeCat = \C x.
+let HomFunctor : (C : Category @ 0) -> ObjOf C -> Functor (Op C) TypeCat = \C x.
   mkFunctor (Op C) TypeCat
-    (\y. HomOf C y x @ 0) -- It needs to be locally small ! Which, it is because C : SmallCat
+    (\y. HomOf C y x) -- It needs to be locally small ! Which, it is because C : SmallCat
     (\y z f h. CompOf C z y x h f) ;
 
-let Yoneda : (C : Category) -> Functor C (FunctorCat (Op C) TypeCat) = \C.
+let Yoneda : (C : Category @ 0) -> Functor C (FunctorCat (Op C) TypeCat) = \C.
   mkFunctor C (FunctorCat (Op C) TypeCat)
     (\x. HomFunctor C x)
     (\x y f. 
@@ -109,4 +107,4 @@ let Yoneda : (C : Category) -> Functor C (FunctorCat (Op C) TypeCat) = \C.
         (\w h. CompOf C w x y f h)
     ) ;
 
-Yoneda TypeCat
+Yoneda CatOfSmallCats

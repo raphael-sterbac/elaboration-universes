@@ -61,31 +61,33 @@ inferU cxt t = do
     _    -> report cxt "expected a type"
 
 downcastVTy :: Size -> VTy -> VTy
-downcastVTy i = \case
-  VU Big          -> VU i
-  VDecode Big t   -> VDecode i t
-  VPi n a b       -> VPi n (downcastVTy i a) (\x -> downcastVTy i (b x))
-  VSigma n a b    -> VSigma n (downcastVTy i a) (\x -> downcastVTy i (b x))
-  VTensor a b     -> VTensor (downcastVTy i a) (downcastVTy i b)
-  VDLabel l ty    -> VDLabel l (downcastVTy i ty)
-  VMu env d       -> VMu env (downcastVDesc i d)
-  VExt d ty       -> VExt (downcastVDesc i d) (downcastVTy i ty)
-  VSquare d p m   -> VSquare (downcastVDesc i d) (\x -> downcastVTy i (p x)) m
+downcastVTy s = \case
+  VU Big          -> VU s
+  VU Omega        -> VU s
+  VDecode Big t   -> VDecode s t
+  VDecode Omega t -> VDecode s t
+  VPi x a b       -> VPi x (downcastVTy s a) (\v -> downcastVTy s (b v))
+  VSigma x a b    -> VSigma x (downcastVTy s a) (\v -> downcastVTy s (b v))
+  VTensor a b     -> VTensor (downcastVTy s a) (downcastVTy s b)
+  VDLabel l ty    -> VDLabel l (downcastVTy s ty)
+  VMu env d       -> VMu env (downcastVDesc s d)
+  VExt d ty       -> VExt (downcastVDesc s d) (downcastVTy s ty)
+  VSquare d p m   -> VSquare (downcastVDesc s d) (\v -> downcastVTy s (p v)) m
   ty              -> ty
 
 downcastVDesc :: Size -> VDesc -> VDesc
-downcastVDesc i = \case
-  VDescTensor d1 d2 -> VDescTensor (downcastVDesc i d1) (downcastVDesc i d2)
-  VDescSum n a d    -> VDescSum n (downcastVTy i a) (\x -> downcastVDesc i (d x))
-  VDescProd n a d   -> VDescProd n (downcastVTy i a) (\x -> downcastVDesc i (d x))
-  VDescCall l k     -> VDescCall l (downcastVTm i k)
+downcastVDesc s = \case
+  VDescTensor d1 d2 -> VDescTensor (downcastVDesc s d1) (downcastVDesc s d2)
+  VDescSum x a d    -> VDescSum x (downcastVTy s a) (\v -> downcastVDesc s (d v))
+  VDescProd x a d   -> VDescProd x (downcastVTy s a) (\v -> downcastVDesc s (d v))
+  VDescCall l k     -> VDescCall l (downcastVTm s k)
   d                 -> d
 
 downcastVTm :: Size -> VTm -> VTm
-downcastVTm i = \case
-  VSwitch tuple u -> VSwitch (downcastVTm i tuple) u
-  VPair t1 t2     -> VPair (downcastVTm i t1) (downcastVTm i t2)
-  VDReturn d      -> VDReturn (downcastVDesc i d)
+downcastVTm s = \case
+  VSwitch tuple u -> VSwitch (downcastVTm s tuple) u
+  VPair t1 t2     -> VPair (downcastVTm s t1) (downcastVTm s t2)
+  VDReturn d      -> VDReturn (downcastVDesc s d)
   t               -> t
 
 isSmall :: Cxt -> Size -> VTy -> M ()
@@ -169,6 +171,28 @@ coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
 
     pure $ Lam n2 n_x
 
+  (VSigma n1 a1 b1, VSigma n2 a2 b2) -> do
+    let vm = evalTm (env cxt) m
+    let m1 = quoteTm l (applyFst vm)
+    let m2 = quoteTm l (applySnd vm)
+
+    c_m1 <- coe cxt l a1 a2 m1
+    let vc_m1 = evalTm (env cxt) c_m1
+    
+    c_m2 <- coe cxt l (b1 (applyFst vm)) (b2 vc_m1) m2
+
+    pure $ DPair n2 c_m1 c_m2
+
+  (VTensor a1 b1, VTensor a2 b2) -> do
+    let vm = evalTm (env cxt) m
+    let m1 = quoteTm l (applyFst vm)
+    let m2 = quoteTm l (applySnd vm)
+
+    c_m1 <- coe cxt l a1 a2 m1
+    c_m2 <- coe cxt l b1 b2 m2
+
+    pure $ Pair c_m1 c_m2
+
   _ ->
     if convTy l sourceTy targetTy then
       pure m
@@ -184,18 +208,22 @@ checkTy cxt t size = case t of
     else report cxt ("Size issue: U " ++ show s' ++ " is too large to fit in " ++ show size)
 
   RAt t' s' -> 
-    if s' > size then 
-      report cxt ("Size annotation @" ++ show s' ++ " is too large for expected size " ++ show size)
+    if s' > size 
+    then report cxt ("Size annotation @" ++ show s' ++ " is too large for expected size " ++ show size)
     else do
-      (tTm, s) <- inferU cxt t'
-      let ty = Decode s tTm
-      let vty = evalTy (env cxt) ty
-    
-      let vty_downcasted = downcastVTy s' vty
-      
-      isSmall cxt size vty_downcasted
-      
-      pure ty
+      (tTm, aTy) <- infer cxt t'
+      case aTy of
+        VU s_infer -> do
+          let ty = Decode s_infer tTm
+          let vty = evalTy (env cxt) ty
+          
+          
+          let vty_downcasted = downcastVTy s' vty
+          
+          isSmall cxt size vty_downcasted
+          
+          pure (quoteTy (lvl cxt) vty_downcasted)
+        _ -> report cxt "Elaboration error: Expected a small type in @ annotation"
 
   RPi x a b -> do
     a' <- checkTy cxt a size

@@ -12,8 +12,4 @@ data ITree (E : Tp -> Tp) (R : Tp) : Tp where {
 let IOEvent : Tp -> Tp = \X. X ;
 let SmallProgram : U 1 = (ITree IOEvent Nat) @ 0;
 
-data Category : Tp where { mkCat : Category } ;
-let MetaEvent : Tp -> Tp = \X. Category ;
-let LargeProgram : Tp = ITree MetaEvent Category ;
-
-LargeProgram
+SmallProgram
