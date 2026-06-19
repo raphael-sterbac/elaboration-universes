@@ -10,17 +10,17 @@ data List (A : Tp) : Tp where {
 
 let UniverseList : Tp = List (U 1) ;
 
-let myTypes : UniverseList = cons (U 1) (U 0) (cons (U 1) (Nat -> Nat) (nil (U 1))) ;
+let myTypes : List (U 2) = cons (U 2) (U 0) (cons (U 2) (Nat -> Nat) (cons (U 2) (UniverseList) (nil (U 2)))) ;
 
-let headTy : UniverseList -> U 1 = \l.
-  elimList (U 1) (\_. U 1)
+let headTy : List (U 2) -> U 2 = \l.
+  elimList (U 2) (\_. U 2)
     < \p ihs. U 0 ,         
     < \p ihs. fst p ,     
     * > >
     l ;
 
-let myExtractedUniverse : headTy myTypes = Nat ;
+let extractedType : headTy myTypes = Nat ;
 
-let myVal : myExtractedUniverse = zero ;
+let myVal : extractedType = zero ;
 
 myVal

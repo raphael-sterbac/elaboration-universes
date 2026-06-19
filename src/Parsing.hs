@@ -102,9 +102,13 @@ pPi = do
 
 funOrSpine = do
   sp <- pSpine
+  res <- optional (symbol "@" *> decimal)     
+  let sp' = case res of
+              Just i -> RAt sp (Sz i)         
+              Nothing -> sp
   optional pArrow >>= \case
-    Nothing -> pure sp
-    Just _  -> RPi "_" sp <$> pRaw
+    Nothing -> pure sp'
+    Just _  -> RPi "_" sp' <$> pRaw
 
 pLet = do
   pKeyword "let"

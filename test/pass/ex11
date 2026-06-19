@@ -1,4 +1,4 @@
-data Nat : U 0 where {
+data Nat : Tp where {
   zero : Nat ;
   succ : Nat -> Nat
 } ;
@@ -88,7 +88,7 @@ let TypeCat : Category =
         (\A x. x)
         (\A B C g f x. g (f x)) ;
 
-let listFmap : (A : U 0) -> (B : U 0) -> (A -> B) -> List A  -> List B  = \A B f l.
+let listFmap : (A : Tp) -> (B : Tp) -> (A -> B) -> List A  -> List B  = \A B f l.
   elimList A (\_. List B )
     < \p ihs. nil B ,
     < \p ihs. cons B (f (fst p)) (fst ihs) ,
@@ -104,11 +104,11 @@ let ListEta : NatTrans TypeCat TypeCat (IdFunctor TypeCat) ListF =
   mkNatTrans TypeCat TypeCat (IdFunctor TypeCat) ListF 
     (\A x. cons A x (nil A)) ;
 
-let append : (B : U 0) -> List B  -> List B  -> List B  = \B l1 l2.
+let append : (B : Tp) -> List B  -> List B  -> List B  = \B l1 l2.
   elimList B (\_. List B )
     < \p ihs. l2 , < \p ihs. cons B (fst p) (fst ihs) , * > > l1 ;
 
-let concat : (A : U 0) -> List (List A )  -> List A  = \A ll.
+let concat : (A : Tp) -> List (List A )  -> List A  = \A ll.
   elimList (List A ) (\_. List A )
     < \p ihs. nil A , < \p ihs. append A (fst p) (fst ihs) , * > > ll ;
 

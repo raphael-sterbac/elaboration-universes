@@ -47,6 +47,7 @@ data Raw
   | RLet Name Raw Raw Raw
   | RSrcPos SourcePos Raw
   | RData Name [(Name, Raw)] Raw (NonEmpty (Name, Raw)) Raw
+  | RAt Raw Size
   deriving Show
 
 -- core syntax

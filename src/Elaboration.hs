@@ -60,20 +60,49 @@ inferU cxt t = do
     VU i -> pure (t', i)
     _    -> report cxt "expected a type"
 
+downcastVTy :: Size -> VTy -> VTy
+downcastVTy i = \case
+  VU Big          -> VU i
+  VDecode Big t   -> VDecode i t
+  VPi n a b       -> VPi n (downcastVTy i a) (\x -> downcastVTy i (b x))
+  VSigma n a b    -> VSigma n (downcastVTy i a) (\x -> downcastVTy i (b x))
+  VTensor a b     -> VTensor (downcastVTy i a) (downcastVTy i b)
+  VDLabel l ty    -> VDLabel l (downcastVTy i ty)
+  VMu env d       -> VMu env (downcastVDesc i d)
+  VExt d ty       -> VExt (downcastVDesc i d) (downcastVTy i ty)
+  VSquare d p m   -> VSquare (downcastVDesc i d) (\x -> downcastVTy i (p x)) m
+  ty              -> ty
+
+downcastVDesc :: Size -> VDesc -> VDesc
+downcastVDesc i = \case
+  VDescTensor d1 d2 -> VDescTensor (downcastVDesc i d1) (downcastVDesc i d2)
+  VDescSum n a d    -> VDescSum n (downcastVTy i a) (\x -> downcastVDesc i (d x))
+  VDescProd n a d   -> VDescProd n (downcastVTy i a) (\x -> downcastVDesc i (d x))
+  VDescCall l k     -> VDescCall l (downcastVTm i k)
+  d                 -> d
+
+downcastVTm :: Size -> VTm -> VTm
+downcastVTm i = \case
+  VSwitch tuple u -> VSwitch (downcastVTm i tuple) u
+  VPair t1 t2     -> VPair (downcastVTm i t1) (downcastVTm i t2)
+  VDReturn d      -> VDReturn (downcastVDesc i d)
+  t               -> t
+
 isSmall :: Cxt -> Size -> VTy -> M ()
 isSmall cxt i = \case
   VU j | j < i -> pure ()
-  VU j -> report cxt ("Universe " ++ show j ++ " is not small at level " ++ show i)
+  VU j         -> report cxt ("Universe " ++ show j ++ " is not small at level " ++ show i)
+
   VDecode j _ | j <= i -> pure ()
-  VDecode j _ -> report cxt ("Decoded type at level " ++ show j ++ " is not small at level " ++ show i)
+  VDecode j _          -> report cxt ("Decoded type at level " ++ show j ++ " is not small at level " ++ show i)
 
-  VPi _ a b -> do
+  VPi n a b -> do
       isSmall cxt i a
-      isSmall cxt i (b (VVar (lvl cxt)))
+      isSmall (bind n a cxt) i (b (VVar (lvl cxt)))
 
-  VSigma _ a b -> do
+  VSigma n a b -> do
       isSmall cxt i a
-      isSmall cxt i (b (VVar (lvl cxt)))
+      isSmall (bind n a cxt) i (b (VVar (lvl cxt)))
 
   VTensor a b -> do
       isSmall cxt i a
@@ -98,18 +127,18 @@ isDescSmall cxt i = \case
 
   VDescSum n a d -> do
     isSmall cxt i a
-    isDescSmall cxt i (d (VVar (lvl cxt)))
+    isDescSmall (bind n a cxt) i (d (VVar (lvl cxt)))
 
   VDescProd n a d -> do
     isSmall cxt i a
-    isDescSmall cxt i (d (VVar (lvl cxt)))
+    isDescSmall (bind n a cxt) i (d (VVar (lvl cxt)))
 
   VDescCall _ k -> case k of
     VSwitch tuple _ -> isTupleSmall cxt i tuple
     _ -> pure ()
 
   VDescUnit -> pure ()
-  VDescVar -> pure ()
+  VDescVar  -> pure ()
 
 isTupleSmall :: Cxt -> Size -> VTm -> M ()
 isTupleSmall cxt i = \case
@@ -143,7 +172,7 @@ coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
   _ ->
     if convTy l sourceTy targetTy then
       pure m
-    else report cxt ("Error: Invalid coercion " ++ showVTy cxt sourceTy ++ "\n \n to \n \n" ++ showVTy cxt targetTy)
+    else report cxt ("Error: Invalid coercion " ++ showVTy cxt sourceTy ++ "\n to \n" ++ showVTy cxt targetTy)
 
 checkTy :: Cxt -> Raw -> Size -> M Ty
 checkTy cxt t size = case t of
@@ -153,6 +182,20 @@ checkTy cxt t size = case t of
     if s' < size
     then pure $ U s'
     else report cxt ("Size issue: U " ++ show s' ++ " is too large to fit in " ++ show size)
+
+  RAt t' s' -> 
+    if s' > size then 
+      report cxt ("Size annotation @" ++ show s' ++ " is too large for expected size " ++ show size)
+    else do
+      (tTm, s) <- inferU cxt t'
+      let ty = Decode s tTm
+      let vty = evalTy (env cxt) ty
+    
+      let vty_downcasted = downcastVTy s' vty
+      
+      isSmall cxt size vty_downcasted
+      
+      pure ty
 
   RPi x a b -> do
     a' <- checkTy cxt a size
@@ -396,6 +439,14 @@ elabElimTm params (Lvl l_p) vDescSum =
 infer :: Cxt -> Raw -> M (Tm, VTy)
 infer cxt = \case
   RSrcPos pos t -> infer (cxt {pos = pos}) t
+
+  RAt t s -> do
+    let nextSize = case s of
+                     Sz i -> Sz (i + 1)
+                     _    -> Omega
+                     
+    ty <- checkTy cxt (RAt t s) nextSize
+    pure (Code nextSize ty, VU nextSize)
 
   RVar x -> do
     let go i [] = report cxt ("variable out of scope: " ++ x)

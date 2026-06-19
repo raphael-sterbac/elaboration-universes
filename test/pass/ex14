@@ -1,0 +1,19 @@
+data Nat : U 0 where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+data ITree (E : Tp -> Tp) (R : Tp) : Tp where {
+  Ret : R -> ITree E R ;
+  Tau : ITree E R -> ITree E R ;
+  Vis : (X : Tp) -> (e : E X) -> (k : X -> ITree E R) -> ITree E R
+} ;
+
+let IOEvent : Tp -> Tp = \X. X ;
+let SmallProgram : U 1 = (ITree IOEvent Nat) @ 0;
+
+data Category : Tp where { mkCat : Category } ;
+let MetaEvent : Tp -> Tp = \X. Category ;
+let LargeProgram : Tp = ITree MetaEvent Category ;
+
+LargeProgram
