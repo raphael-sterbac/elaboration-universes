@@ -46,8 +46,8 @@ pKeyword kw = do
   C.string kw
   (takeWhile1P Nothing isAlphaNum *> empty) <|> ws
 
-pAtom :: Parser Raw
-pAtom =
+pAtomBase :: Parser Raw
+pAtomBase =
       withPos (
             (RVar <$> pIdent)
         <|> (RU . Sz <$> (pKeyword "U" *> decimal))
@@ -55,6 +55,8 @@ pAtom =
         <|> (ROne <$ symbol "*")
         <|> (RFst <$> (pKeyword "fst" *> pAtom))
         <|> (RSnd <$> (pKeyword "snd" *> pAtom))
+        <|> (RRecord [] <$ pKeyword "Unit")
+        <|> pRecord
         <|> try (do
               symbol "⟨" <|> symbol "<"
               t <- pRaw
@@ -64,6 +66,35 @@ pAtom =
               pure (RPair t u))
       )
   <|> parens pRaw
+
+pRecord :: Parser Raw
+pRecord = do
+  symbol "{"
+  (do 
+    symbol "}"
+    pure (RRecordVal [])
+   ) <|> (do
+    f <- pBinder
+    (do
+      symbol ":"
+      ty <- pRaw
+      rest <- many (symbol "," *> ((,) <$> pBinder <*> (symbol ":" *> pRaw)))
+      symbol "}"
+      pure $ RRecord ((f, ty) : rest)
+     ) <|> (do
+      symbol "="
+      tm <- pRaw
+      rest <- many (symbol "," *> ((,) <$> pBinder <*> (symbol "=" *> pRaw)))
+      symbol "}"
+      pure $ RRecordVal ((f, tm) : rest)
+     )
+   )
+
+pAtom :: Parser Raw
+pAtom = do
+  base <- pAtomBase
+  projs <- many (symbol "." *> pIdent)
+  pure $ foldl RProj base projs
 
 pTele :: Parser [(Name, Raw)]
 pTele = concat <$> many (parens ((\xs a -> map (\x -> (x, a)) xs) <$> some pBinder <*> (symbol ":" *> pRaw)))

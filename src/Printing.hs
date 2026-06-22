@@ -23,8 +23,23 @@ par p p' = showParen (p' < p)
 
 prettyTm :: Int -> [Name] -> Tm -> ShowS
 prettyTm = goTm where
+  isRecordVal :: Tm -> Bool
+  isRecordVal One = True
+  isRecordVal (DPair _ _ u) = isRecordVal u
+  isRecordVal _ = False
+
+  printRecordVal :: [Name] -> Tm -> ShowS
+  printRecordVal ns (DPair x t u) = 
+    (x++) . (" = "++) . goTm letp ns t .
+    (case u of
+      One -> id
+      _   -> (", "++) . printRecordVal ns u)
+  printRecordVal _ _ = id
+
   goTm :: Int -> [Name] -> Tm -> ShowS
   goTm p ns = \case
+    tm@(DPair _ _ _) | isRecordVal tm -> par p appp $ ("{ "++) . printRecordVal ns tm . (" }"++)
+    
     Var (Ix x) ->
       if x < 0 || x >= length ns then 
         (("Free" ++ show x) ++)
@@ -90,8 +105,23 @@ prettyTy :: Int -> [Name] -> Ty -> ShowS
 prettyTy = goTy where
   piBind ns x a = showParen True ((x++) . (" : "++) . goTy letp ns a)
   
+  isRecord :: Ty -> Bool
+  isRecord Unit = True
+  isRecord (Sigma _ _ b) = isRecord b
+  isRecord _ = False
+
+  printRecord :: [Name] -> Ty -> ShowS
+  printRecord ns (Sigma (fresh ns -> x) a b) = 
+    (x++) . (" : "++) . goTy letp ns a . 
+    (case b of
+      Unit -> id
+      _    -> (", "++) . printRecord (x:ns) b)
+  printRecord _ _ = id
+
   goTy :: Int -> [Name] -> Ty -> ShowS
   goTy p ns = \case    
+    ty@(Sigma _ _ _) | isRecord ty -> par p appp $ ("{ "++) . printRecord ns ty . (" }"++)
+       
     U Big -> ("Tp"++)
     U i -> par p appp $ ("U "++).(show i++)
 
@@ -104,7 +134,7 @@ prettyTy = goTy where
 
     Decode i t -> ('<':).prettyTm letp ns t.('>':)
 
-    Unit -> ("1"++)
+    Unit -> ("{}"++)
 
     Tensor a b -> par p appp $ goTy atomp ns a . (" × "++) . goTy atomp ns b
 

@@ -13,23 +13,23 @@ data Id (A : Tp) : Tp where {
 } ;
 
 data Monad : Tp where {
-  mkMonad : (M : U 0 -> U 5) ->
-            (ret : (A : U 0) -> A -> M A) ->
-            (bind : (A : U 0) -> (B : U 0) -> M A -> (A -> M B) -> M B) ->
+  mkMonad : (M : Tp -> Tp) ->
+            (ret : (A : Tp) -> A -> M A) ->
+            (bind : (A : Tp) -> (B : Tp) -> M A -> (A -> M B) -> M B) ->
             Monad
 } ;
 
-let listRet : (A : U 2) -> A -> List A = \A x.
+let listRet : (A : Tp) -> A -> List A = \A x.
   cons A x (nil A) ;
 
-let append : (B : U 2) -> List B -> List B -> List B  = \B l1 l2.
+let append : (B : Tp) -> List B -> List B -> List B  = \B l1 l2.
   elimList B (\_. List B )
     < \p ihs. l2 ,
     < \p ihs. cons B (fst p) (fst ihs) ,
     * > >
     l1 ;
 
-let listBind : (A : U 2) -> (B : U 2) -> List A  -> (A -> List B ) -> List B  = \A B l f.
+let listBind : (A : Tp) -> (B : Tp) -> List A  -> (A -> List B ) -> List B  = \A B l f.
   elimList A (\_. List B )
     < \p ihs. nil B ,
     < \p ihs. append B (f (fst p)) (fst ihs) ,
@@ -38,10 +38,10 @@ let listBind : (A : U 2) -> (B : U 2) -> List A  -> (A -> List B ) -> List B  = 
 
 let ListMonad : Monad = mkMonad (\A. List A) listRet listBind ;
 
-let idRet : (A : U 2) -> A -> Id A  = \A x.
+let idRet : (A : Tp) -> A -> Id A  = \A x.
   mkId A x ;
 
-let idBind : (A : U 2) -> (B : U 2) -> Id A  -> (A -> Id B ) -> Id B  = \A B i f.
+let idBind : (A : Tp) -> (B : Tp) -> Id A  -> (A -> Id B ) -> Id B  = \A B i f.
   elimId A (\_. Id B )
     < \p ihs. f (fst p) ,
     * >

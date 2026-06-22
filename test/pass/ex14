@@ -1,4 +1,4 @@
-data Nat : U 0 where {
+data Nat : Tp where {
   zero : Nat ;
   succ : Nat -> Nat
 } ;
@@ -9,7 +9,40 @@ data ITree (E : Tp -> Tp) (R : Tp) : Tp where {
   Vis : (X : Tp) -> (e : E X) -> (k : X -> ITree E R) -> ITree E R
 } ;
 
-let IOEvent : Tp -> Tp = \X. X ;
-let SmallProgram : U 1 = (ITree IOEvent Nat) @ 0;
+let BindITree : (E : Tp -> Tp) -> (A : Tp) -> (B : Tp) -> 
+                ITree E A -> (A -> ITree E B) -> ITree E B = \E A B tree f.
+  elimITree E A (\_. ITree E B)
+    < \p ihs. f fst p , 
+    
+    < \p ihs. Tau E B fst ihs , 
+    
+    < \p ihs. Vis E B (fst p) (fst (snd p)) fst ihs , 
+    
+    * > > > 
+    tree ;
 
-SmallProgram
+let MapITree : (E : Tp -> Tp) -> (A : Tp) -> (B : Tp) -> 
+               (A -> B) -> ITree E A -> ITree E B = \E A B f tree.
+  BindITree E A B tree (\a. Ret E B (f a)) ;
+
+
+let YieldEff : Tp -> Tp = \X. Nat ;
+
+let P1 : ITree YieldEff Nat = Ret YieldEff Nat zero ;
+
+let P2 : ITree YieldEff Nat = 
+  Vis YieldEff Nat 
+      Nat                      
+      zero                     
+      (\x. Ret YieldEff Nat x) ; 
+
+
+let SmallProgramType : U 1 = ITree YieldEff Nat @ 0 ;
+
+let SmallP : SmallProgramType = 
+  Tau YieldEff Nat P1 ;
+
+let P3 : ITree YieldEff Nat = 
+  BindITree YieldEff Nat Nat SmallP (\x. Ret YieldEff Nat (succ x)) ;
+
+P3

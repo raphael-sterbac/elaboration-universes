@@ -1,110 +1,79 @@
-data Category : Tp where {
-  mkCat : (Obj : Tp) ->
-          (Hom : Obj -> Obj -> Tp) ->
-          (id : (x : Obj) -> Hom x x) ->
-          (comp : (x : Obj) -> (y : Obj) -> (z : Obj) -> Hom y z -> Hom x y -> Hom x z) ->
-          Category
+let Category : Tp = {
+  Obj : Tp,
+  Hom : Obj -> Obj -> Tp,
+  id : (x : Obj) -> Hom x x,
+  comp : (x : Obj) -> (y : Obj) -> (z : Obj) -> Hom y z -> Hom x y -> Hom x z
 } ;
 
-let ObjOf : Category -> Tp = \C.
-  elimCategory (\_. Tp)
-    < \p ihs. fst p , * > 
-    C ;
-
-let HomOf : (C : Category) -> ObjOf C -> ObjOf C -> Tp = \C.
-  elimCategory (\CIn. ObjOf CIn -> ObjOf CIn -> Tp)
-    < \p ihs. fst (snd p) , * > 
-    C ;
-
-let IdOf : (C : Category) -> (x : ObjOf C) -> HomOf C x x = \C.
-  elimCategory (\Cin. (x : ObjOf Cin) -> HomOf Cin x x) < \p i. fst (snd (snd p)) , * > C ;
-
-let CompOf : (C : Category) -> (x : ObjOf C) -> (y : ObjOf C) -> (z : ObjOf C) -> 
-             HomOf C y z -> HomOf C x y -> HomOf C x z = \C.
-  let Motive : Category -> Tp = \Cin. (x : ObjOf Cin) -> (y : ObjOf Cin) -> (z : ObjOf Cin) -> HomOf Cin y z -> HomOf Cin x y -> HomOf Cin x z ;
-  elimCategory Motive < \p i. fst (snd (snd (snd p))) , * > C ;
-
-data Functor (C : Category) (D : Category) : Tp where {
-  mkFunctor : (FObj : ObjOf C -> ObjOf D) ->
-              (FHom : (x : ObjOf C) -> (y : ObjOf C) -> HomOf C x y -> HomOf D (FObj x) (FObj y)) ->
-              Functor C D
+let Functor : (C : Category) -> (D : Category) -> Tp = \C D. {
+  FObj : C.Obj -> D.Obj,
+  FHom : (x : C.Obj) -> (y : C.Obj) -> C.Hom x y -> D.Hom (FObj x) (FObj y)
 } ;
 
-let FObjOf : (C : Category) -> (D : Category) -> Functor C D -> ObjOf C -> ObjOf D = \C D F.
-  elimFunctor C D (\FIn. ObjOf C -> ObjOf D)
-    < \p ihs. fst p , * > 
-    F ;
-
-let FHomOf : (C : Category) -> (D : Category) -> (F : Functor C D) -> 
-             (x : ObjOf C) -> (y : ObjOf C) -> HomOf C x y -> HomOf D (FObjOf C D F x) (FObjOf C D F y) = \C D F.
-  let Motive : Functor C D -> Tp = \Fin. (x : ObjOf C) -> (y : ObjOf C) -> HomOf C x y -> HomOf D (FObjOf C D Fin x) (FObjOf C D Fin y) ;
-  elimFunctor C D Motive
-    < \p ihs. \x y hom. (fst (snd p)) x y hom , * > 
-    F ;
-
-data NatTrans (C : Category) (D : Category) (F : Functor C D) (G : Functor C D) : Tp where {
-  mkNatTrans : (cmp : (x : ObjOf C) -> HomOf D (FObjOf C D F x) (FObjOf C D G x)) ->
-               NatTrans C D F G
+let NatTrans : (C : Category) -> (D : Category) -> (F : Functor C D) -> (G : Functor C D) -> Tp = \C D F G. {
+  cmp : (x : C.Obj) -> D.Hom (F.FObj x) (G.FObj x)
 } ;
 
-let CmpOf : (C : Category) -> (D : Category) -> (F : Functor C D) -> (G : Functor C D) -> 
-            (N : NatTrans C D F G) -> (x : ObjOf C) -> HomOf D (FObjOf C D F x) (FObjOf C D G x) = \C D F G N.
-  let Motive : NatTrans C D F G -> Tp = \Nin. (x : ObjOf C) -> HomOf D (FObjOf C D F x) (FObjOf C D G x) ;
-  elimNatTrans C D F G Motive < \p ihs. fst p , * > N ;
+let IdNatTrans : (C : Category) -> (D : Category) -> (F : Functor C D) -> NatTrans C D F F = \C D F. {
+  cmp = \x. D.id (F.FObj x)
+} ;
 
-let IdNatTrans : (C : Category) -> (D : Category) -> (F : Functor C D) -> NatTrans C D F F = \C D F.
-  mkNatTrans C D F F (\x. IdOf D (FObjOf C D F x)) ;
+let CompNatTrans : 
+    (C : Category) -> (D : Category) -> (F : Functor C D) -> (G : Functor C D) -> (H : Functor C D) ->
+        NatTrans C D G H -> NatTrans C D F G -> NatTrans C D F H = \C D F G H Beta Alpha.
+{
+  cmp = \x. D.comp (F.FObj x) (G.FObj x) (H.FObj x) (Beta.cmp x) (Alpha.cmp x)
+} ;
 
-let CompNatTrans : (C : Category) -> (D : Category) -> (F : Functor C D) -> (G : Functor C D) -> (H : Functor C D) ->
-                   NatTrans C D G H -> NatTrans C D F G -> NatTrans C D F H = \C D F G H Beta Alpha.
-  mkNatTrans C D F H
-    (\x. CompOf D (FObjOf C D F x) (FObjOf C D G x) (FObjOf C D H x) 
-                  (CmpOf C D G H Beta x) (CmpOf C D F G Alpha x)) ;
+let FunctorCat : (C : Category) -> (D : Category) -> Category = \C D. {
+  Obj = Functor C D,
+  Hom = \F G. NatTrans C D F G,
+  id = \F. IdNatTrans C D F,
+  comp = \F G H Beta Alpha. CompNatTrans C D F G H Beta Alpha
+} ;
 
-let FunctorCat : (C : Category) -> (D : Category) -> Category = \C D.
-  mkCat (Functor C D)
-        (\F G. NatTrans C D F G)
-        (\F. IdNatTrans C D F)
-        (\F G H Beta Alpha. CompNatTrans C D F G H Beta Alpha) ;
-
-let IdFunctor : (C : Category) -> Functor C C = \C.
-  mkFunctor C C (\x. x) (\x y f. f) ;
+let IdFunctor : (C : Category) -> Functor C C = \C. {
+  FObj = \x. x,
+  FHom = \x y f. f
+} ;
 
 let CompFunctor : (C : Category) -> (D : Category) -> (E : Category) -> 
-                  Functor D E -> Functor C D -> Functor C E = \C D E F G.
-  mkFunctor C E
-    (\x. FObjOf D E F (FObjOf C D G x))
-    (\x y f. FHomOf D E F (FObjOf C D G x) (FObjOf C D G y) (FHomOf C D G x y f)) ;
+                  Functor D E -> Functor C D -> Functor C E = \C D E F G. {
+  FObj = \x. F.FObj (G.FObj x),
+  FHom = \x y f. F.FHom (G.FObj x) (G.FObj y) (G.FHom x y f)
+} ;
 
-let CatOfSmallCats : Category =
-  mkCat (Category @ 0)
-        (\C D. Functor C D )
-        (\C. IdFunctor C )
-        (\C D E G F. CompFunctor C D E G F ) ;
+let TypeCat0 : Category @ 1 = {
+  Obj = U 0,
+  Hom = \A B. A -> B,
+  id = \A x. x,
+  comp = \A B K g f x. g (f x)
+} ;
 
-let TypeCat : Category @ 0 =
-  mkCat (U 0)
-        (\A B. A -> B)
-        (\A x. x)
-        (\A B K g f x. g (f x)) ;
+let TypeCat : Category @ 2 = {
+  Obj = U 1,
+  Hom = \A B. A -> B,
+  id = \A x. x,
+  comp = \A B K g f x. g (f x)
+} ;
 
-let Op : (C : Category) -> Category = \C.
-  mkCat (ObjOf C)
-        (\x y. HomOf C y x)             
-        (\x. IdOf C x)                  
-        (\x y z f g. CompOf C z y x g f) ;
+let Op : (C : Category) -> Category = \C. {
+  Obj = C.Obj,
+  Hom = \x y. C.Hom y x,
+  id = \x. C.id x,
+  comp = \x y z f g. C.comp z y x g f
+} ;
 
-let HomFunctor : (C : Category @ 0) -> ObjOf C -> Functor (Op C) TypeCat = \C x.
-  mkFunctor (Op C) TypeCat
-    (\y. HomOf C y x) -- It needs to be locally small ! Which, it is because C : SmallCat
-    (\y z f h. CompOf C z y x h f) ;
+let HomFunctor : (C : Category @ 1) -> C.Obj -> Functor (Op C) TypeCat = \C x. {
+  FObj = \y. C.Hom y x,
+  FHom = \y z f h. C.comp z y x h f
+} ;
 
-let Yoneda : (C : Category @ 0) -> Functor C (FunctorCat (Op C) TypeCat) = \C.
-  mkFunctor C (FunctorCat (Op C) TypeCat)
-    (\x. HomFunctor C x)
-    (\x y f. 
-      mkNatTrans (Op C) TypeCat (HomFunctor C x) (HomFunctor C y)
-        (\w h. CompOf C w x y f h)
-    ) ;
+let Yoneda : (C : Category @ 1) -> Functor C (FunctorCat (Op C) TypeCat) = \C. {
+  FObj = \x. HomFunctor C x,
+  FHom = \x y f. {
+    cmp = \w h. C.comp w x y f h
+  }
+} ;
 
-Yoneda CatOfSmallCats
+Yoneda TypeCat0

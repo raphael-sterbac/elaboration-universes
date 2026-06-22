@@ -63,9 +63,8 @@ inferU cxt t = do
 downcastVTy :: Size -> VTy -> VTy
 downcastVTy s = \case
   VU Big          -> VU s
-  VU Omega        -> VU s
-  VDecode Big t   -> VDecode s t
-  VDecode Omega t -> VDecode s t
+  VDecode Big t   -> VDecode s (downcastVTm s t)
+
   VPi x a b       -> VPi x (downcastVTy s a) (\v -> downcastVTy s (b v))
   VSigma x a b    -> VSigma x (downcastVTy s a) (\v -> downcastVTy s (b v))
   VTensor a b     -> VTensor (downcastVTy s a) (downcastVTy s b)
@@ -88,6 +87,7 @@ downcastVTm s = \case
   VSwitch tuple u -> VSwitch (downcastVTm s tuple) u
   VPair t1 t2     -> VPair (downcastVTm s t1) (downcastVTm s t2)
   VDReturn d      -> VDReturn (downcastVDesc s d)
+  VCode Big t -> VCode s t
   t               -> t
 
 isSmall :: Cxt -> Size -> VTy -> M ()
@@ -151,52 +151,132 @@ isTupleSmall cxt i = \case
   VOne -> pure ()
   _ -> pure ()
 
-coe :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
-coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
-  (VU i, VU j) | i <= j ->
-    pure $ Code j (Decode i m)
-
-  (VPi n1 a1 b1, VPi n2 a2 b2) -> do
-    let cxt' = bind n2 a2 cxt
-    let l' = lvl cxt'
-
-    u_x <- coe cxt' l' a2 a1 (Var (Ix 0))
-
-    let env' = env cxt'
-    let vu_x = evalTm env' u_x
-    let vm = evalTm (env cxt) m
-    let m_u_x = quoteTm l' (vApp vm vu_x)
-
-    n_x <- coe cxt' l' (b1 vu_x) (b2 (VVar l)) m_u_x
-
-    pure $ Lam n2 n_x
-
-  (VSigma n1 a1 b1, VSigma n2 a2 b2) -> do
-    let vm = evalTm (env cxt) m
-    let m1 = quoteTm l (applyFst vm)
-    let m2 = quoteTm l (applySnd vm)
-
-    c_m1 <- coe cxt l a1 a2 m1
-    let vc_m1 = evalTm (env cxt) c_m1
+coeDesc :: Cxt -> Lvl -> VDesc -> VDesc -> Tm -> M Tm
+coeDesc cxt l sourceDesc targetDesc m =
+  if convDesc l sourceDesc targetDesc then
+    pure m
+  else case (sourceDesc, targetDesc) of
+    (VDescUnit, VDescUnit) -> pure m
+    (VDescVar, VDescVar) -> pure m
     
-    c_m2 <- coe cxt l (b1 (applyFst vm)) (b2 vc_m1) m2
+    (VDescTensor d1 d2, VDescTensor d1' d2') -> do
+      let vm = evalTm (env cxt) m
+      let m1 = quoteTm l (applyFst vm)
+      let m2 = quoteTm l (applySnd vm)
 
-    pure $ DPair n2 c_m1 c_m2
+      c_m1 <- coeDesc cxt l d1 d1' m1
+      c_m2 <- coeDesc cxt l d2 d2' m2
 
-  (VTensor a1 b1, VTensor a2 b2) -> do
-    let vm = evalTm (env cxt) m
-    let m1 = quoteTm l (applyFst vm)
-    let m2 = quoteTm l (applySnd vm)
+      pure $ Pair c_m1 c_m2
 
-    c_m1 <- coe cxt l a1 a2 m1
-    c_m2 <- coe cxt l b1 b2 m2
+    (VDescSum n1 a1 b1, VDescSum n2 a2 b2) -> do
+      let vm = evalTm (env cxt) m
+      let m1 = quoteTm l (applyFst vm)
+      let m2 = quoteTm l (applySnd vm)
 
-    pure $ Pair c_m1 c_m2
+      c_m1 <- coe cxt l a1 a2 m1
+      let vc_m1 = evalTm (env cxt) c_m1
 
-  _ ->
-    if convTy l sourceTy targetTy then
-      pure m
-    else report cxt ("Error: Invalid coercion " ++ showVTy cxt sourceTy ++ "\n to \n" ++ showVTy cxt targetTy)
+      c_m2 <- coeDesc cxt l (b1 (applyFst vm)) (b2 vc_m1) m2
+
+      pure $ DPair n2 c_m1 c_m2
+
+    (VDescProd n1 a1 b1, VDescProd n2 a2 b2) -> do
+      let vm = evalTm (env cxt) m
+      let m1 = quoteTm l (applyFst vm)
+      let m2 = quoteTm l (applySnd vm)
+
+      c_m1 <- coe cxt l a1 a2 m1
+      let vc_m1 = evalTm (env cxt) c_m1
+
+      c_m2 <- coeDesc cxt l (b1 (applyFst vm)) (b2 vc_m1) m2
+
+      pure $ DPair n2 c_m1 c_m2
+
+    (VDescCall _ k1, VDescCall _ k2) -> do
+      case (k1, k2) of
+        (VSwitch (VPair (VDReturn d1) _) _, VSwitch (VPair (VDReturn d2) _) _) -> coeDesc cxt l d1 d2 m
+        _ -> if convTm l k1 k2 then pure $ m
+            else report cxt ("Error : Invalid coercion \n" ++ showVal cxt k1 ++ "\n to \n" ++ showVal cxt k2)
+
+    _ -> report cxt "Error: Invalid coercion in description"
+
+coe :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
+coe cxt l sourceTy targetTy m =
+  if convTy l sourceTy targetTy then
+    pure m
+  else case (sourceTy, targetTy) of
+    (VU i, VU j) | i <= j ->
+      pure $ Code j (Decode i m)
+
+    (VPi n1 a1 b1, VPi n2 a2 b2) -> do
+      let cxt' = bind n2 a2 cxt
+      let l' = lvl cxt'
+
+      u_x <- coe cxt' l' a2 a1 (Var (Ix 0))
+
+      let env' = env cxt'
+      let vu_x = evalTm env' u_x
+      let vm = evalTm (env cxt) m
+      let m_u_x = quoteTm l' (vApp vm vu_x)
+
+      n_x <- coe cxt' l' (b1 vu_x) (b2 (VVar l)) m_u_x
+
+      pure $ Lam n2 n_x
+
+    (VSigma n1 a1 b1, VSigma n2 a2 b2) -> do
+      let vm = evalTm (env cxt) m
+      let m1 = quoteTm l (applyFst vm)
+      let m2 = quoteTm l (applySnd vm)
+
+      c_m1 <- coe cxt l a1 a2 m1
+      let vc_m1 = evalTm (env cxt) c_m1
+      
+      c_m2 <- coe cxt l (b1 (applyFst vm)) (b2 vc_m1) m2
+
+      pure $ DPair n2 c_m1 c_m2
+
+    (VTensor a1 b1, VTensor a2 b2) -> do
+      let vm = evalTm (env cxt) m
+      let m1 = quoteTm l (applyFst vm)
+      let m2 = quoteTm l (applySnd vm)
+
+      c_m1 <- coe cxt l a1 a2 m1
+      c_m2 <- coe cxt l b1 b2 m2
+
+      pure $ Pair c_m1 c_m2
+
+    (VDLabel _ ty1, VDLabel _ ty2) -> 
+      coe cxt l ty1 ty2 m
+
+    (VExt d1 _, VExt d2 _) -> 
+      coeDesc cxt l d1 d2 m
+
+    (VMu _ d1, VMu _ d2) -> do
+      let vm = evalTm (env cxt) m
+      case vm of
+        VIn inner_v -> do
+          let inner_m = quoteTm l inner_v
+          c_inner <- coeDesc cxt l d1 d2 inner_m
+          pure $ In c_inner
+          
+        _ -> do
+          let targetTyTm = quoteTy l targetTy
+        
+          let p_motive = Lam "_" (Code Omega targetTyTm)
+          
+          let l' = l + 2
+          let env' = VVar (l+1) : VVar l : env cxt
+          let cxt' = cxt { env = env', lvl = l' }
+          
+          c_p <- coeDesc cxt' l' d1 d2 (Var (Ix 1))
+          let step = Lam "p" (Lam "ihs" (In c_p))
+          
+          let d1_tm = quoteDesc l d1
+          pure $ Elim d1_tm p_motive step m
+
+    _ ->
+      report cxt ("Error: Invalid coercion \n" ++ showVTy cxt sourceTy ++ "\n to \n" ++ showVTy cxt targetTy)
 
 checkTy :: Cxt -> Raw -> Size -> M Ty
 checkTy cxt t size = case t of
@@ -206,6 +286,13 @@ checkTy cxt t size = case t of
     if s' < size
     then pure $ U s'
     else report cxt ("Size issue: U " ++ show s' ++ " is too large to fit in " ++ show size)
+
+  RRecord [] -> pure Unit
+  RRecord ((x, a):xs) -> do
+    aTy <- checkTy cxt a Omega
+    let cxt' = bind x (evalTy (env cxt) aTy) cxt
+    bTy <- checkTy cxt' (RRecord xs) Omega
+    pure $ Sigma x aTy bTy
 
   RAt t' s' -> 
     if s' > size 
@@ -243,6 +330,15 @@ checkTy cxt t size = case t of
 check :: Cxt -> Raw -> VTy -> M Tm
 check cxt t a = case (t, a) of
   (RSrcPos pos t, a) -> check (cxt {pos = pos}) t a
+
+  (RRecordVal [], VUnit) -> pure One
+  
+  (RRecordVal ((x, val):xs), VSigma y aTy bTy) -> do
+    if x /= y then report cxt ("Expected field " ++ y ++ " but got " ++ x) else pure ()
+    tTm <- check cxt val aTy
+    let vt = evalTm (env cxt) tTm
+    uTm <- check cxt (RRecordVal xs) (bTy vt)
+    pure $ DPair x tTm uTm
 
   (RLam x t, VPi x' a b) ->
     Lam x <$> check (bind x a cxt) t (b (VVar (lvl cxt)))
@@ -482,6 +578,25 @@ infer cxt = \case
           | x == x'   = pure (Var i, a)
           | otherwise = go (i + 1) tys
     go 0 (types cxt)
+
+  RProj t x -> do
+    (tTm, tTy) <- infer cxt t
+    let elabProj c ty tm field = case ty of
+          VSigma y a b ->
+            if field == y then
+              pure (Fst tm, a)
+            else do
+              let vFst = evalTm (env c) (Fst tm)
+              elabProj c (b vFst) (Snd tm) field
+          _ -> report c ("Field " ++ field ++ " not found in record")
+    elabProj cxt tTy tTm x
+
+  RRecord fields -> do
+    ty <- checkTy cxt (RRecord fields) Omega
+    pure (Code Omega ty, VU Omega)
+
+  RRecordVal [] -> pure (One, VUnit)
+  RRecordVal _  -> report cxt "Cannot infer type of non-empty record value"
 
   RApp t u -> do
     (t', tty) <- infer cxt t
