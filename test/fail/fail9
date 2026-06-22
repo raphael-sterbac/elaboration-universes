@@ -1,0 +1,5 @@
+let ParadoxRec : U 0 = {
+  massiveField : Tp
+} ;
+
+ParadoxRec

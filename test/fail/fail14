@@ -1,0 +1,14 @@
+data Wrapper : Tp where {
+  wrap : (A : Tp) -> A -> Wrapper
+} ;
+
+let SmallWrapperType : U 1 = Wrapper @ 0 ;
+
+let myWrap : SmallWrapperType = wrap (U 0) Nat @ 0 ;
+
+let escape : U 0 = 
+  elimWrapper (\_. Tp)
+    < \p ihs. fst (snd p) > 
+    myWrap ;
+
+escape

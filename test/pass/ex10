@@ -8,59 +8,39 @@ data List (A : Tp) : Tp where {
   cons : A -> List A -> List A
 } ;
 
-data Id (A : Tp) : Tp where {
-  mkId : A -> Id A
+let Monad : Tp = {
+  M : Tp -> Tp,
+  ret : (A : Tp) -> A -> M A,
+  bind : (A : Tp) -> (B : Tp) -> M A -> (A -> M B) -> M B
 } ;
 
-data Monad : Tp where {
-  mkMonad : (M : Tp -> Tp) ->
-            (ret : (A : Tp) -> A -> M A) ->
-            (bind : (A : Tp) -> (B : Tp) -> M A -> (A -> M B) -> M B) ->
-            Monad
-} ;
-
-let listRet : (A : Tp) -> A -> List A = \A x.
-  cons A x (nil A) ;
-
-let append : (B : Tp) -> List B -> List B -> List B  = \B l1 l2.
-  elimList B (\_. List B )
+let append : (B : Tp) -> List B -> List B -> List B = \B l1 l2.
+  elimList B (\_. List B)
     < \p ihs. l2 ,
-    < \p ihs. cons B (fst p) (fst ihs) ,
+    < \p ihs. cons B (fst p) fst ihs ,
     * > >
     l1 ;
 
-let listBind : (A : Tp) -> (B : Tp) -> List A  -> (A -> List B ) -> List B  = \A B l f.
-  elimList A (\_. List B )
-    < \p ihs. nil B ,
-    < \p ihs. append B (f (fst p)) (fst ihs) ,
-    * > >
-    l ;
+let ListMonad : Monad = {
+  M = \A. List A,
+  ret = \A x. cons A x (nil A),
+  bind = \A B l f.
+    elimList A (\_. List B)
+      < \p ihs. nil B ,
+      < \p ihs. append B (f (fst p)) fst ihs ,
+      * > >
+      l
+} ;
 
-let ListMonad : Monad = mkMonad (\A. List A) listRet listBind ;
+let mapM : (m : Monad) -> (A : Tp) -> (B : Tp) -> (A -> B) -> m.M A -> m.M B = \m A B f ma.
+  m.bind A B ma (\a. m.ret B (f a)) ;
 
-let idRet : (A : Tp) -> A -> Id A  = \A x.
-  mkId A x ;
+let Database : U 1 = {
+  activeIds : List Nat
+} ;
 
-let idBind : (A : Tp) -> (B : Tp) -> Id A  -> (A -> Id B ) -> Id B  = \A B i f.
-  elimId A (\_. Id B )
-    < \p ihs. f (fst p) ,
-    * >
-    i ;
+let myDb : Database = {
+  activeIds = cons Nat zero (cons Nat (succ zero) (nil Nat))
+} ;
 
-let IdMonad : Monad = mkMonad (\A. Id A ) idRet idBind ;
-
-let MonadList : Tp = List Monad ;
-
-let myList : MonadList = 
-  cons Monad ListMonad (cons Monad IdMonad (nil Monad)) ;
-
-let extractFirst : MonadList -> Monad = \r.
-  elimList Monad (\_. Monad)
-    < \p ihs. IdMonad , 
-    < \p ihs. fst p ,
-    * > >
-    r ;
-
-let myMonad : Monad = extractFirst myList ;
-
-myMonad
+mapM ListMonad Nat Nat (\x. succ x) myDb.activeIds

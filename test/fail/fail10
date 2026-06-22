@@ -1,0 +1,5 @@
+let BigData : Tp = U 1 ;
+
+let FraudulentCast : U 0 = BigData @ 0 ;
+
+FraudulentCast

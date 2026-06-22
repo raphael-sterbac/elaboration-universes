@@ -1,0 +1,15 @@
+let SmallConsumer : Tp = {
+  consume : U 0 -> U 0
+} ;
+
+let LargeConsumer : Tp = {
+  consume : Tp -> U 0
+} ;
+
+let myConsumer : SmallConsumer = {
+  consume = \x. x
+} ;
+
+let badSubtype : LargeConsumer = myConsumer ;
+
+badSubtype

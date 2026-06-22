@@ -1,0 +1,4 @@
+let OpaqueDowncast : (X : Tp) -> U 0 = \X.
+  X @ 0 ;
+
+OpaqueDowncast
