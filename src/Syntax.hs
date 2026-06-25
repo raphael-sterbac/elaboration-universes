@@ -47,7 +47,6 @@ data Raw
   | RLet Name Raw Raw Raw
   | RSrcPos SourcePos Raw
   | RData Name [(Name, Raw)] Raw (NonEmpty (Name, Raw)) Raw
-  | RAt Raw Size
   | RRecord [(Name, Raw)]
   | RRecordVal [(Name, Raw)]
   | RProj Raw Name

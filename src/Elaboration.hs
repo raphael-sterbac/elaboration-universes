@@ -60,72 +60,6 @@ inferU cxt t = do
     VU i -> pure (t', i)
     _    -> report cxt "expected a type"
 
-downcastVTy :: Cxt -> Size -> VTy -> VTy
-downcastVTy cxt s = \case
-  VU Big          -> VU s
-  
-  VDecode Big t   -> 
-    let t_down = downcastVTm cxt s t
-        
-        getVarTy c = \case
-          VVar x -> Just (snd (types c !! (let Ix i = lvl2Ix (lvl c) x in i)))
-          VApp f _ -> getVarTy c f
-          VFst f -> getVarTy c f
-          VSnd f -> getVarTy c f
-          VSwitch f _ -> getVarTy c f
-          _ -> Nothing  
-        
-        getTargetUniv l = \case
-          VU s' -> Just s'
-          VDecode s' _ -> Just s'
-          VPi _ _ b -> getTargetUniv (l + 1) (b (VVar l))
-          _ -> Nothing
-          
-    in case getVarTy cxt t of
-         Just ty -> case getTargetUniv (lvl cxt) ty of
-           Just s' | s' <= s -> VDecode s t_down
-           _ -> VDecode Big t_down
-         _ -> VDecode Big t_down
-
-  VPi x a b -> 
-    let a_down = downcastVTy cxt s a
-        cxt' = bind x a_down cxt
-    in VPi x a_down (\v -> downcastVTy cxt' s (b v))
-    
-  VSigma x a b -> 
-    let a_down = downcastVTy cxt s a
-        cxt' = bind x a_down cxt
-    in VSigma x a_down (\v -> downcastVTy cxt' s (b v))
-
-  VTensor a b -> VTensor (downcastVTy cxt s a) (downcastVTy cxt s b)
-  VDLabel l ty -> VDLabel l (downcastVTy cxt s ty)
-  VMu env d -> VMu env (downcastVDesc cxt s d)
-  VExt d ty -> VExt (downcastVDesc cxt s d) (downcastVTy cxt s ty)
-  VSquare d p m -> VSquare (downcastVDesc cxt s d) (\v -> downcastVTy (bind "_" VUnit cxt) s (p v)) m
-  ty -> ty
-
-downcastVDesc :: Cxt -> Size -> VDesc -> VDesc
-downcastVDesc cxt s = \case
-  VDescTensor d1 d2 -> VDescTensor (downcastVDesc cxt s d1) (downcastVDesc cxt s d2)
-  VDescSum x a d -> 
-    let a_down = downcastVTy cxt s a
-        cxt' = bind x a_down cxt
-    in VDescSum x a_down (\v -> downcastVDesc cxt' s (d v))
-  VDescProd x a d -> 
-    let a_down = downcastVTy cxt s a
-        cxt' = bind x a_down cxt
-    in VDescProd x a_down (\v -> downcastVDesc cxt' s (d v))
-  VDescCall l k -> VDescCall l (downcastVTm cxt s k)
-  d -> d
-
-downcastVTm :: Cxt -> Size -> VTm -> VTm
-downcastVTm cxt s = \case
-  VSwitch tuple u -> VSwitch (downcastVTm cxt s tuple) u
-  VPair t1 t2 -> VPair (downcastVTm cxt s t1) (downcastVTm cxt s t2)
-  VDReturn d -> VDReturn (downcastVDesc cxt s d)
-  VCode Big t -> VCode s (downcastVTy cxt s t)
-  t -> t
-
 isSmall :: Cxt -> Size -> VTy -> M ()
 isSmall cxt i = \case
   VU j | j < i -> pure ()
@@ -333,23 +267,6 @@ checkTy cxt t size = case t of
     let cxt' = bind x (evalTy (env cxt) aTy) cxt
     bTy <- checkTy cxt' (RRecord xs) nextSize
     pure $ Sigma x aTy bTy
-
-  RAt t' s' -> 
-    if s' > size then
-      report cxt ("Size annotation @" ++ show s' ++ " is too large for expected size " ++ show size)
-    else do
-      (tTm, aTy) <- infer cxt t'
-      case aTy of
-        VU s_infer -> do
-          let ty = Decode s_infer tTm
-          let vty = evalTy (env cxt) ty
-          
-          let vty_downcasted = downcastVTy cxt s' vty
-          
-          isSmall cxt size vty_downcasted
-          
-          pure (quoteTy (lvl cxt) vty_downcasted)
-        _ -> report cxt "Elaboration error: Expected a small type in @ annotation"
 
   RPi x a b -> do
     a' <- checkTy cxt a size
@@ -602,14 +519,6 @@ elabElimTm params (Lvl l_p) vDescSum =
 infer :: Cxt -> Raw -> M (Tm, VTy)
 infer cxt = \case
   RSrcPos pos t -> infer (cxt {pos = pos}) t
-
-  RAt t s -> do
-    let nextSize = case s of
-                     Sz i -> Sz (i + 1)
-                     _    -> Omega
-                     
-    ty <- checkTy cxt (RAt t s) nextSize
-    pure (Code nextSize ty, VU nextSize)
 
   RVar x -> do
     let go i [] = report cxt ("variable out of scope: " ++ x)
