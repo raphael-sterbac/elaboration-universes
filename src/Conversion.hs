@@ -26,6 +26,8 @@ convTm l t u =
 
   (VCode s a, VCode s' b) | s == s' -> convTy l a b
 
+  (VLAbs _ t, VLAbs _ t') -> convTm (l + 1) (t (VLVar l)) (t' (VLVar l))
+
   -- Descriptions
   (VIn t1, VIn t2) -> convTm l t1 t2
   (VSquareMap d f m, VSquareMap d' f' m') -> convDesc l d d' && convTm l f f' && convTm l m m'
@@ -54,6 +56,8 @@ convTy l t u =
   (VPi _ a b, VPi _ a' b') -> convTy l a a' && convTy (l + 1) (b (VVar l)) (b' (VVar l))
   (VSigma _ a b, VSigma _ a' b') -> convTy l a a' && convTy (l + 1) (b (VVar l)) (b' (VVar l))
   (VDecode i a, VDecode j b) | i == j -> convTm l a b
+
+  (VLPi _ a, VLPi _ a') -> convTy (l + 1) (a (VLVar l)) (a' (VLVar l))
 
   -- Descriptions
   (VSquare d p m, VSquare d' p' m') -> convDesc l d d'  && convTy (l + 1) (p (VVar l)) (p' (VVar l))  && convTm l m m'

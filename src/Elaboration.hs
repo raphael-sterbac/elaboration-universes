@@ -22,11 +22,15 @@ emptyCxt = Cxt [] [] 0
 
 bind :: Name -> VTy -> Cxt -> Cxt
 bind x ~a (Cxt env types l pos) =
-  Cxt (VVar l:env) ((x, a):types) (l + 1) pos
+  Cxt (VETm (VVar l):env) ((x, a):types) (l + 1) pos
+
+bindLevel :: Name -> Cxt -> Cxt
+bindLevel x (Cxt env types l pos) =
+  Cxt (VESize (VLVar l):env) ((x, VUnit):types) (l + 1) pos
 
 define :: Name -> VTm -> VTy -> Cxt -> Cxt
 define x ~t ~a (Cxt env types l pos) =
-  Cxt (t:env) ((x, a):types) (l + 1) pos
+  Cxt (VETm t:env) ((x, a):types) (l + 1) pos
 
 type M = Either (String, SourcePos)
 
@@ -57,39 +61,43 @@ inferU :: Cxt -> Raw -> M (Tm, Size)
 inferU cxt t = do
   (t', a) <- infer cxt t
   case a of
-    VU i -> pure (t', i)
+    VU i -> pure (t', quoteSize (lvl cxt) i)
     _    -> report cxt "expected a type"
 
 isSmall :: Cxt -> Size -> VTy -> M ()
-isSmall cxt i = \case
-  VU j | j < i -> pure ()
-  VU j -> report cxt ("Universe " ++ show j ++ " is not small at level " ++ show i)
+isSmall cxt i ty = do
+  let vi = evalSize (env cxt) i
+  case ty of
+    VU j | j < vi -> pure ()
+    VU j -> report cxt ("Universe " ++ showVTy cxt (VU j) ++ " is not small at level " ++ showTy cxt (U i))
 
-  VDecode j _ | j <= i -> pure ()
-  VDecode j _ -> report cxt ("Decoded type at level " ++ show j ++ " is not small at level " ++ show i)
+    VDecode j _ | j <= vi -> pure ()
+    VDecode j _ -> report cxt ("Decoded type at level " ++ showVTy cxt (VU j) ++ " is not small at level " ++ showTy cxt (U i))
 
-  VPi n a b -> do
-      isSmall cxt i a
-      isSmall (bind n a cxt) i (b (VVar (lvl cxt)))
+    VLPi n a -> isSmall (bindLevel n cxt) i (a (VLVar (lvl cxt)))
 
-  VSigma n a b -> do
-      isSmall cxt i a
-      isSmall (bind n a cxt) i (b (VVar (lvl cxt)))
+    VPi n a b -> do
+        isSmall cxt i a
+        isSmall (bind n a cxt) i (b (VVar (lvl cxt)))
 
-  VTensor a b -> do
-      isSmall cxt i a
-      isSmall cxt i b
-  VUnit -> pure ()
-  VDLabel _ ty -> isSmall cxt i ty
+    VSigma n a b -> do
+        isSmall cxt i a
+        isSmall (bind n a cxt) i (b (VVar (lvl cxt)))
 
-  VMu _ d -> isDescSmall cxt i d
+    VTensor a b -> do
+        isSmall cxt i a
+        isSmall cxt i b
+    VUnit -> pure ()
+    VDLabel _ tyInner -> isSmall cxt i tyInner
 
-  VEnumU -> pure ()
-  VEnumT _ -> pure ()
-  VSmallPiE _ _ -> pure ()
+    VMu _ d -> isDescSmall cxt i d
 
-  VExt _ _ -> report cxt "Cannot prove smallness: opaque description extension"
-  VSquare _ _ _ -> report cxt "Cannot prove smallness: opaque square"
+    VEnumU -> pure ()
+    VEnumT _ -> pure ()
+    VSmallPiE _ _ -> pure ()
+
+    VExt _ _ -> report cxt "Cannot prove smallness: opaque description extension"
+    VSquare _ _ _ -> report cxt "Cannot prove smallness: opaque square"
 
 isDescSmall :: Cxt -> Size -> VDesc -> M ()
 isDescSmall cxt i = \case
@@ -121,63 +129,13 @@ isTupleSmall cxt i = \case
   VOne -> pure ()
   _ -> pure ()
 
-coeDesc :: Cxt -> Lvl -> VDesc -> VDesc -> Tm -> M Tm
-coeDesc cxt l sourceDesc targetDesc m =
-  if convDesc l sourceDesc targetDesc then
-    pure m
-  else case (sourceDesc, targetDesc) of
-    (VDescUnit, VDescUnit) -> pure m
-    (VDescVar, VDescVar) -> pure m
-    
-    (VDescTensor d1 d2, VDescTensor d1' d2') -> do
-      let vm = evalTm (env cxt) m
-      let m1 = quoteTm l (applyFst vm)
-      let m2 = quoteTm l (applySnd vm)
-
-      c_m1 <- coeDesc cxt l d1 d1' m1
-      c_m2 <- coeDesc cxt l d2 d2' m2
-
-      pure $ Pair c_m1 c_m2
-
-    (VDescSum n1 a1 b1, VDescSum n2 a2 b2) -> do
-      let vm = evalTm (env cxt) m
-      let m1 = quoteTm l (applyFst vm)
-      let m2 = quoteTm l (applySnd vm)
-
-      c_m1 <- coe cxt l a1 a2 m1
-      let vc_m1 = evalTm (env cxt) c_m1
-
-      c_m2 <- coeDesc cxt l (b1 (applyFst vm)) (b2 vc_m1) m2
-
-      pure $ DPair n2 c_m1 c_m2
-
-    (VDescProd n1 a1 b1, VDescProd n2 a2 b2) -> do
-      let vm = evalTm (env cxt) m
-      let m1 = quoteTm l (applyFst vm)
-      let m2 = quoteTm l (applySnd vm)
-
-      c_m1 <- coe cxt l a1 a2 m1
-      let vc_m1 = evalTm (env cxt) c_m1
-
-      c_m2 <- coeDesc cxt l (b1 (applyFst vm)) (b2 vc_m1) m2
-
-      pure $ DPair n2 c_m1 c_m2
-
-    (VDescCall _ k1, VDescCall _ k2) -> do
-      case (k1, k2) of
-        (VSwitch (VPair (VDReturn d1) _) _, VSwitch (VPair (VDReturn d2) _) _) -> coeDesc cxt l d1 d2 m
-        _ -> if convTm l k1 k2 then pure $ m
-            else report cxt ("Error : Invalid coercion \n" ++ showVal cxt k1 ++ "\n to \n" ++ showVal cxt k2)
-
-    _ -> report cxt "Error: Invalid coercion in description"
-
 coe :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
 coe cxt l sourceTy targetTy m =
   if convTy l sourceTy targetTy then
     pure m
   else case (sourceTy, targetTy) of
     (VU i, VU j) | i <= j ->
-      pure $ Code j (Decode i m)
+      pure $ Code (quoteSize (lvl cxt) j) (Decode (quoteSize (lvl cxt) i) m)
 
     (VPi n1 a1 b1, VPi n2 a2 b2) -> do
       let cxt' = bind n2 a2 cxt
@@ -216,49 +174,35 @@ coe cxt l sourceTy targetTy m =
 
       pure $ Pair c_m1 c_m2
 
-    (VDLabel _ ty1, VDLabel _ ty2) -> 
-      coe cxt l ty1 ty2 m
-
-    (VExt d1 _, VExt d2 _) -> 
-      coeDesc cxt l d1 d2 m
-
-    (VMu _ d1, VMu _ d2) -> do
-      let vm = evalTm (env cxt) m
-      case vm of
-        VIn inner_v -> do
-          let inner_m = quoteTm l inner_v
-          c_inner <- coeDesc cxt l d1 d2 inner_m
-          pure $ In c_inner
-          
-        _ -> do
-          let targetTyTm = quoteTy l targetTy
-        
-          let p_motive = Lam "_" (Code Omega targetTyTm)
-          
-          let l' = l + 2
-          let env' = VVar (l+1) : VVar l : env cxt
-          let cxt' = cxt { env = env', lvl = l' }
-          
-          c_p <- coeDesc cxt' l' d1 d2 (Var (Ix 1))
-          let step = Lam "p" (Lam "ihs" (In c_p))
-          
-          let d1_tm = quoteDesc l d1
-          pure $ Elim d1_tm p_motive step m
-
     _ ->
       report cxt ("Error: Invalid coercion \n" ++ showVTy cxt sourceTy ++ "\n to \n" ++ showVTy cxt targetTy)
+
+elabSize :: Cxt -> RawSize -> M Size
+elabSize cxt = \case
+  RSzVar x -> do
+    let go i [] = report cxt ("Level variable out of scope: " ++ x)
+        go i ((x', _):tys)
+          | x == x'   = pure (LVar (Ix i))
+          | otherwise = go (i + 1) tys
+    go 0 (types cxt)
+  RSz i -> pure (Sz i)
+  RBig -> pure Big
+  ROmega -> pure Omega
 
 checkTy :: Cxt -> Raw -> Size -> M Ty
 checkTy cxt t size = case t of
   RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
 
-  RU s' ->
+  RU s -> do
+    s' <- elabSize cxt s
     if s' < size
     then pure $ U s'
-    else report cxt ("Size issue: U " ++ show s' ++ " is too large to fit in " ++ show size)
+    else report cxt ("Size issue: " ++ showTy cxt (U s') ++ " is too large to fit in " ++ showTy cxt (U size))
 
   RRecord [] -> pure Unit
   RRecord ((x, a):xs) -> do
+    -- TODO : Make sure that records indeed live in the right universe
+    -- Maybe just the user notation is broken : `let Category : Tp = {}`
     let nextSize = case size of
           Sz i -> Sz (i + 1)
           _  -> Omega
@@ -273,6 +217,11 @@ checkTy cxt t size = case t of
     let cxt' = bind x (evalTy (env cxt) a') cxt
     b' <- checkTy cxt' b size
     pure $ Pi x a' b'
+
+  RLPi l a -> do
+    let cxt' = bindLevel l cxt
+    a' <- checkTy cxt' a size
+    pure $ LPi l a'
 
   _ -> do
     (tTm, s) <- inferU cxt t
@@ -299,9 +248,15 @@ check cxt t a = case (t, a) of
   (RLam x t, VPi x' a b) ->
     Lam x <$> check (bind x a cxt) t (b (VVar (lvl cxt)))
 
+  (RLAbs l t, VLPi _ b) -> do
+    let cxt' = bindLevel l cxt
+    t' <- check cxt' t (b (VLVar (lvl cxt)))
+    pure $ LAbs l t'
+
   (_, VU s) -> do
-    u <- checkTy cxt t s
-    pure $ Code s u
+    let sQuote = quoteSize (lvl cxt) s
+    u <- checkTy cxt t sQuote
+    pure $ Code sQuote u
 
   (ROne, VUnit) -> pure One
 
@@ -309,7 +264,7 @@ check cxt t a = case (t, a) of
 
   (RPair t1 t2, VSmallPiE (VConsE _ eRest) f) -> do
       let getTy (VCode _ ty) = ty
-          getTy v            = VDecode Big v
+          getTy v            = VDecode VBig v
 
       u1 <- check cxt t1 (getTy (vApp f VZeroE))
       u2 <- check cxt t2 (VSmallPiE eRest (VLam "e" \e -> vApp f (VSuccE e)))
@@ -465,7 +420,7 @@ elabConstrs dName params c (((cName, cTyRaw), cTag) : rest) = do
 --------------------------------------------------------
 
 -- Elaborates the eliminator type
-elabElimTy :: Size -> Name -> [(Name, Raw)] -> [Ty] -> Lvl -> VTm -> VTm -> VTm -> Ty
+elabElimTy :: VSize -> Name -> [(Name, Raw)] -> [Ty] -> Lvl -> VTm -> VTm -> VTm -> Ty
 elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm vTermD =
   let n = length params
 
@@ -474,7 +429,7 @@ elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm vTermD =
 
       vDatatype = VDecode uLevel vDatatypeCode
 
-      vPTy = VPi "x" vDatatype (\_ -> VU Omega)
+      vPTy = VPi "x" vDatatype (\_ -> VU VOmega)
 
       -- TODO : check the "hardcoded" eliminator type more carefuly
       vElimTyBody =
@@ -485,15 +440,15 @@ elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm vTermD =
                     vFuncTy = VExt vDesc_c vDatatype
                 in VPi "p" vFuncTy $ \vFunc ->
 
-                     let vIhTy = VSquare vDesc_c (VDecode Omega . vApp vP) vFunc
-                         vTargetExp = VDecode Omega (vApp vP (VIn (VDPair "c" vc vFunc)))
+                     let vIhTy = VSquare vDesc_c (VDecode VOmega . vApp vP) vFunc
+                         vTargetExp = VDecode VOmega (vApp vP (VIn (VDPair "c" vc vFunc)))
                      in VPi "ih" vIhTy $ const vTargetExp
 
-              vMTy = VSmallPiE vTagTm (VLam "c" (VCode Omega . mBody))
+              vMTy = VSmallPiE vTagTm (VLam "c" (VCode VOmega . mBody))
 
           in VPi "m" vMTy $ \vM ->
                VPi "x" vDatatype $ \vX ->
-                 VDecode Omega (vApp vP vX)
+                 VDecode VOmega (vApp vP vX)
 
       elimTyBodyTm = quoteTy (Lvl l_p) vElimTyBody
 
@@ -523,7 +478,9 @@ infer cxt = \case
   RVar x -> do
     let go i [] = report cxt ("variable out of scope: " ++ x)
         go i ((x', a):tys)
-          | x == x'   = pure (Var i, a)
+          | x == x'   = case env cxt !! i of
+                          VETm _ -> pure (Var (Ix i), a)
+                          VESize _ -> report cxt ("Expected a term variable, but '" ++ x ++ "' is a level variable.")
           | otherwise = go (i + 1) tys
     go 0 (types cxt)
 
@@ -541,7 +498,7 @@ infer cxt = \case
 
   RRecord fields -> do
     ty <- checkTy cxt (RRecord fields) Omega
-    pure (Code Omega ty, VU Omega)
+    pure (Code Omega ty, VU VOmega)
 
   RRecordVal [] -> pure (One, VUnit)
   RRecordVal _  -> report cxt "Cannot infer type of non-empty record value"
@@ -554,6 +511,15 @@ infer cxt = \case
         pure (App t' u', b (evalTm (env cxt) u'))
       tty ->
         report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt tty
+
+  RLApp t s -> do
+    (tTm, tTy) <- infer cxt t
+    case tTy of
+      VLPi _ b -> do
+        sz <- elabSize cxt s
+        let vsz = evalSize (env cxt) sz
+        pure (LApp tTm sz, b vsz)
+      _ -> report cxt ("Expected a level-polymorphic type for level application, instead inferred:\n\n  " ++ showVTy cxt tTy)
 
   RFst t -> do
     (tTm, tTy) <- infer cxt t
@@ -622,7 +588,8 @@ infer cxt = \case
     let vTagTm = evalTm (env cxt_params) tagTm
     let vDescSum = evalDesc (env cxt_params) descSum
 
-    let elimTyFull = elabElimTy uLevel x params pTyTms (lvl cxt_params) vTuple vTagTm vTermD
+    let vuLevel = evalSize (env cxt_params) uLevel
+    let elimTyFull = elabElimTy vuLevel x params pTyTms (lvl cxt_params) vTuple vTagTm vTermD
     let elimTmFull = elabElimTm params (lvl cxt_params) vDescSum
 
     let vElimTy = evalTy (env cxt) elimTyFull
@@ -645,3 +612,5 @@ infer cxt = \case
   RU {} -> report cxt "Can't infer type for universe"
   RPi {} -> report cxt "Can't infer type for product type"
   RLam {} -> report cxt "Can't infer type for lambda expression."
+  RLPi {} -> report cxt "Can't infer type for level product type"
+  RLAbs {} -> report cxt "Can't infer type for level abstraction"

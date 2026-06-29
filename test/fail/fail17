@@ -1,0 +1,4 @@
+let badSort : ∀ l. U l = 
+  Λ l. l ;
+
+badSort

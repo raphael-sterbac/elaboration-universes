@@ -1,0 +1,24 @@
+data Nat : Tp where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+let Monoid : ∀ l. U l -> U l = Λ l. \A. {
+  mnull : A,
+  mprod : A -> A -> A
+} ;
+
+
+let add : Nat -> Nat -> Nat = \a b.
+  elimNat (\_. Nat)
+    < \p ih. b ,
+    < \p ih. succ (fst ih) ,
+    * > >
+    a ;
+
+let NatMonoid : Monoid {0} Nat = {
+  mnull = zero,
+  mprod = \x y. add x y
+} ;
+
+NatMonoid

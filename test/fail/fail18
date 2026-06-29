@@ -1,0 +1,7 @@
+let id : ∀ l. (A : U l) -> A -> A = 
+  Λ l. \A x. x ;
+
+let fail : Tp = 
+  id {0} Tp (U 0) ;
+
+fail

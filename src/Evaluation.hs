@@ -7,15 +7,43 @@ import Syntax
 -- values
 ------------------------------------------------------------
 
-type Env = [VTm]
+data VEnvVal = VETm VTm | VESize VSize
+type Env = [VEnvVal]
 data VLabel = VData Name [VTm]
+
+data VSize = VLVar Lvl | VSz Int | VBig | VOmega deriving (Eq)
+
+instance Ord VSize where
+  VSz i <= VSz j = i <= j
+  VSz _ <= VBig = True
+  VSz _ <= VOmega = True
+  VLVar _ <= VOmega = True
+  VSz 0 <= VLVar _ = True 
+  VBig <= VBig = True
+  VBig <= VOmega = True
+  VOmega <= VOmega = True
+  _ <= _ = False
+
+  VSz i < VSz j = i < j
+  VSz _ < VBig = True
+  VSz _ < VOmega = True
+  VLVar _ < VBig = True
+  VBig < VOmega = True
+  _ < _ = False
+
+instance Show VSize where
+  show (VLVar i) = show i
+  show (VSz i) = show i
+  show VBig    = "Tp"
+  show VOmega  = "Omega"
 
 data VTy
   = VPi Name ~VTy (VTm -> VTy)
-  | VU Size 
-  | VDecode Size VTm
+  | VU VSize 
+  | VDecode VSize VTm
   | VSigma Name VTy (VTm -> VTy)
   | VUnit
+  | VLPi Name (VSize -> VTy)
   -- Descriptions
   | VTensor VTy VTy
   | VSquare VDesc (VTm -> VTy) VTm
@@ -30,7 +58,7 @@ data VTy
 data VTm
   = VVar Lvl
   | VApp VTm ~VTm
-  | VCode Size VTy
+  | VCode VSize VTy
   | VLam Name (VTm -> VTm)
   | VPair VTm VTm
   | VDPair Name VTm VTm
@@ -38,6 +66,8 @@ data VTm
   | VSnd VTm
   | VOne
   | VConLabel Name VTm
+  | VLAbs Name (VSize -> VTm)
+  | VLApp VTm VSize
   -- Descriptions
   | VIn VTm
   | VSquareMap VDesc VTm VTm
@@ -67,6 +97,10 @@ data VDesc
 vApp :: VTm -> VTm -> VTm
 vApp (VLam _ f) v = f v
 vApp f          v = VApp f v
+
+vLApp :: VTm -> VSize -> VTm
+vLApp (VLAbs _ f) s = f s
+vLApp f           s = VLApp f s
 
 -- External functions for descriptions
 applyExtMap :: VDesc -> VTm -> VTm -> VTm
@@ -114,22 +148,36 @@ applySnd (VPair _ u) = u
 applySnd (VDPair _ _ u) = u
 applySnd v = VSnd v
 
+evalSize :: Env -> Size -> VSize
+evalSize env = \case
+  LVar (Ix x) -> case env !! x of
+    VESize s -> s
+    _ -> error "Evaluation error: Expected a level variable in environment"
+  Sz i -> VSz i 
+  Big -> VBig
+  Omega -> VOmega
+
 evalTm :: Env -> Tm -> VTm
 evalTm env = \case
-  Var (Ix x)    -> env !! x
-  App t u       -> vApp (evalTm env t) (evalTm env u)
-  Lam x t       -> VLam x \v -> evalTm (v:env) t
-  Let x _ t u   -> evalTm (evalTm env t : env) u
-  Pair t u      -> VPair (evalTm env t) (evalTm env u)
-  DPair x t u   -> VDPair x (evalTm env t) (evalTm env u)
-  One           -> VOne
-  In t          -> VIn (evalTm env t)
-  Fst t         -> applyFst (evalTm env t)
-  Snd t         -> applySnd (evalTm env t)
-  ConLabel n t  -> VConLabel n (evalTm env t)
+  Var (Ix x) -> case env !! x of
+    VETm t -> t
+    _ -> error "Evaluation error: Expected a term variable in environment"
+  App t u -> vApp (evalTm env t) (evalTm env u)
+  Lam x t -> VLam x \v -> evalTm (VETm v : env) t
+  Let x _ t u -> evalTm (VETm (evalTm env t) : env) u
+  Pair t u -> VPair (evalTm env t) (evalTm env u)
+  DPair x t u -> VDPair x (evalTm env t) (evalTm env u)
+  One -> VOne
+  In t -> VIn (evalTm env t)
+  Fst t -> applyFst (evalTm env t)
+  Snd t -> applySnd (evalTm env t)
+  ConLabel n t -> VConLabel n (evalTm env t)
+
+  LAbs x t -> VLAbs x \i -> evalTm (VESize i : env) t
+  LApp t s -> vLApp (evalTm env t) (evalSize env s)
   
   -- Case of a Coding
-  Code s a      -> VCode s (evalTy env a)
+  Code s a      -> VCode (evalSize env s) (evalTy env a)
   
   -- Descriptions
   ExtMap d f m -> 
@@ -183,17 +231,19 @@ applySquare vd p vm = case vd of
 
 evalTy :: Env -> Ty -> VTy
 evalTy env = \case
-  Pi x a b      -> VPi x (evalTy env a) \v -> evalTy (v:env) b
-  U s           -> VU s
-  Sigma x a b   -> VSigma x (evalTy env a) \v -> evalTy (v:env) b
+  Pi x a b      -> VPi x (evalTy env a) \v -> evalTy (VETm v : env) b
+  U s           -> VU (evalSize env s)
+  Sigma x a b   -> VSigma x (evalTy env a) \v -> evalTy (VETm v : env) b
   Tensor a b    -> VTensor (evalTy env a) (evalTy env b)
   Unit          -> VUnit
   DLabel (Data n ts) ty -> VDLabel (VData n (map (evalTm env) ts)) (evalTy env ty)
 
   -- Case of a Decoding
   Decode i t    -> case evalTm env t of
-    VCode j a | i == j  -> a
-    v                   -> VDecode i v
+    VCode j a | (evalSize env i) == j -> a
+    v                   -> VDecode (evalSize env i) v
+
+  LPi x t       -> VLPi x \i -> evalTy (VESize i : env) t
 
   -- Descriptions
   Ext d x -> 
@@ -202,7 +252,7 @@ evalTy env = \case
     in applyExt vd vx
 
   Square d p m ->
-    let vp = \v -> evalTy (v:env) p
+    let vp = \v -> evalTy ((VETm v):env) p
         vm = evalTm env m
         vd = evalDesc env d
     in applySquare vd vp vm
@@ -218,14 +268,21 @@ evalDesc env = \case
   DescUnit         -> VDescUnit
   DescVar          -> VDescVar
   DescTensor d1 d2 -> VDescTensor (evalDesc env d1) (evalDesc env d2)
-  DescSum n a d    -> VDescSum n (evalTy env a) \v -> evalDesc (v:env) d
-  DescProd n a d   -> VDescProd n (evalTy env a) \v -> evalDesc (v:env) d
+  DescSum n a d    -> VDescSum n (evalTy env a) \v -> evalDesc (VETm v : env) d
+  DescProd n a d   -> VDescProd n (evalTy env a) \v -> evalDesc (VETm v : env) d
   DescCall (Data n ts) t -> case (evalTm env t) of
     VDReturn d -> d
     k -> VDescCall (VData n (map (evalTm env) ts)) k
 
 lvl2Ix :: Lvl -> Lvl -> Ix
 lvl2Ix (Lvl l) (Lvl x) = Ix (l - x - 1)
+
+quoteSize :: Lvl -> VSize -> Size
+quoteSize l = \case
+  VLVar x -> LVar (lvl2Ix l x)
+  VSz i -> Sz i
+  VBig -> Big
+  VOmega -> Omega
 
 quoteTm :: Lvl -> VTm -> Tm
 quoteTm l = \case
@@ -239,8 +296,11 @@ quoteTm l = \case
   VSnd t -> Snd (quoteTm l t)
   VConLabel n t -> ConLabel n (quoteTm l t)
 
+  VLAbs x t -> LAbs x (quoteTm (l+1) (t (VLVar l)))
+  VLApp t s -> LApp (quoteTm l t) (quoteSize l s)
+
   -- Case of a Coding
-  VCode s a   -> Code s (quoteTy l a)
+  VCode s a   -> Code (quoteSize l s) (quoteTy l a)
 
   -- Descriptions
   VIn t -> In (quoteTm l t)
@@ -259,14 +319,15 @@ quoteTm l = \case
 quoteTy :: Lvl -> VTy -> Ty
 quoteTy l = \case
   VPi  x a b  -> Pi x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
-  VU s        -> U s
+  VU s        -> U (quoteSize l s)
   VSigma x a b -> Sigma x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
   VUnit       -> Unit
   VTensor a b -> Tensor (quoteTy l a) (quoteTy l b)
   VDLabel (VData n ts) ty -> DLabel (Data n (map (quoteTm l) ts)) (quoteTy l ty)
+  VLPi x t -> LPi x (quoteTy (l+1) (t (VLVar l)))
   
   -- Case of a Decoding
-  VDecode s t -> Decode s (quoteTm l t)
+  VDecode s t -> Decode (quoteSize l s) (quoteTm l t)
 
   -- Descriptions
   VSquare d p m -> Square (quoteDesc l d) (quoteTy (l + 1) (p (VVar l))) (quoteTm l m)

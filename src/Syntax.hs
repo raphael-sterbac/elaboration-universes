@@ -10,12 +10,15 @@ newtype Ix  = Ix  Int deriving (Eq, Show, Num) via Int
 -- De Bruijn level.
 newtype Lvl = Lvl Int deriving (Eq, Show, Num) via Int
 
-data Size = Sz Int | Big | Omega deriving (Eq)
+data RawSize = RSzVar Name | RSz Int | RBig | ROmega deriving Show
+data Size = LVar Ix | Sz Int | Big | Omega deriving (Eq)
 
 instance Ord Size where
   Sz i <= Sz j = i <= j
   Sz _ <= Big = True
   Sz _ <= Omega = True
+  LVar _ <= Big = True
+  Sz 0 <= LVar _ = True 
   Big <= Big = True
   Big <= Omega = True
   Omega <= Omega = True
@@ -24,10 +27,12 @@ instance Ord Size where
   Sz i < Sz j = i < j
   Sz _ < Big = True
   Sz _ < Omega = True
+  LVar _ < Omega = True
   Big < Omega = True
   _ < _ = False
 
 instance Show Size where
+  show (LVar i) = show i
   show (Sz i) = show i
   show Big    = "Tp"
   show Omega  = "Omega"
@@ -38,8 +43,11 @@ data Raw
   = RVar Name
   | RLam Name Raw
   | RApp Raw Raw
-  | RU Size
+  | RU RawSize
   | RPi Name Raw Raw
+  | RLPi Name Raw
+  | RLAbs Name Raw
+  | RLApp Raw RawSize
   | RPair Raw Raw
   | ROne
   | RFst Raw
@@ -73,6 +81,7 @@ data Ty
   | Unit
   | Sigma Name ~Ty Ty
   | Tensor Ty Ty
+  | LPi Name Ty
   -- Descriptions
   | Ext Desc Ty
   | Mu Desc
@@ -95,6 +104,8 @@ data Tm
   | Snd Tm
   | One
   | ConLabel Name Tm
+  | LAbs Name Tm
+  | LApp Tm Size 
   -- Descriptions 
   | In Tm
   | SquareMap Desc Tm Tm

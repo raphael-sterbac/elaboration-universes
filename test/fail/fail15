@@ -1,0 +1,4 @@
+let bad : ∀ l. U l -> U 0 = 
+  Λ l. \X. X ;
+
+bad

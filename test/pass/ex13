@@ -43,15 +43,8 @@ let CompFunctor : (C : Category) -> (D : Category) -> (E : Category) ->
   FHom = \x y f. F.FHom (G.FObj x) (G.FObj y) (G.FHom x y f)
 } ;
 
-let TypeCat0 : Category  = {
-  Obj = U 0,
-  Hom = \A B. A -> B,
-  id = \A x. x,
-  comp = \A B K g f x. g (f x)
-} ;
-
 let TypeCat : Category  = {
-  Obj = U 1,
+  Obj = U 0,
   Hom = \A B. A -> B,
   id = \A x. x,
   comp = \A B K g f x. g (f x)
@@ -64,16 +57,4 @@ let Op : (C : Category) -> Category = \C. {
   comp = \x y z f g. C.comp z y x g f
 } ;
 
-let HomFunctor : (C : Category @ 1) -> C.Obj -> Functor (Op C) TypeCat = \C x. {
-  FObj = \y. C.Hom y x,
-  FHom = \y z f h. C.comp z y x h f
-} ;
-
-let Yoneda : (C : Category) -> Functor C (FunctorCat (Op C) TypeCat) = \C. {
-  FObj = \x. HomFunctor C x,
-  FHom = \x y f. {
-    cmp = \w h. C.comp w x y f h
-  }
-} ;
-
-Yoneda TypeCat0
+TypeCat

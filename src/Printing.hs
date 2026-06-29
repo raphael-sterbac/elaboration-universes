@@ -21,6 +21,17 @@ letp  = 0  :: Int -- let, lambda
 par :: Int -> Int -> ShowS -> ShowS
 par p p' = showParen (p' < p)
 
+prettySize :: [Name] -> Size -> ShowS
+prettySize ns = \case
+  LVar (Ix x) -> 
+    if x < 0 || x >= length ns then 
+      (("l" ++ show x) ++)
+    else 
+      ((ns !! x) ++)
+  Sz i -> (show i ++)
+  Big -> ("Tp"++)
+  Omega -> ("Omega"++)
+
 prettyTm :: Int -> [Name] -> Tm -> ShowS
 prettyTm = goTm where
   isRecordVal :: Tm -> Bool
@@ -46,6 +57,12 @@ prettyTm = goTm where
       else case ns !! x of
         "_"   -> ("@"++).(show x++)
         n     -> (n++)
+
+    LAbs (fresh ns -> x) t -> par p letp $ ("Λ "++) . (x++) . goLAbs (x:ns) t where
+      goLAbs ns (LAbs (fresh ns -> x) t') = (' ':) . (x++) . goLAbs (x:ns) t'
+      goLAbs ns t' = (". "++) . goTm letp ns t'
+
+    LApp t s -> par p appp $ goTm appp ns t . (" {"++) . prettySize ns s . ("}"++)
 
     App t u -> par p appp $ goTm appp ns t . (' ':) . goTm atomp ns u
 
@@ -122,8 +139,7 @@ prettyTy = goTy where
   goTy p ns = \case    
     ty@(Sigma _ _ _) | isRecord ty -> par p appp $ ("{ "++) . printRecord ns ty . (" }"++)
        
-    U Big -> ("Tp"++)
-    U i -> par p appp $ ("U "++).(show i++)
+    U i -> par p appp $ ("U "++) . prettySize ns i
 
     Pi "_" a b -> par p pip $ goTy appp ns a . (" → "++) . goTy pip ("_":ns) b
 
@@ -131,6 +147,10 @@ prettyTy = goTy where
       goPi ns (Pi "_" a b) = (". "++) . goTy appp ns a . (" → "++) . goTy pip ("_":ns) b
       goPi ns (Pi x a b) = piBind ns x a . goPi (x:ns) b
       goPi ns b = (". "++) . goTy pip ns b
+
+    LPi (fresh ns -> x) t -> par p pip $ ("∀ "++) . (x++) . goLPi (x:ns) t where
+      goLPi ns (LPi (fresh ns -> x) t') = (' ':) . (x++) . goLPi (x:ns) t'
+      goLPi ns t' = (". "++) . goTy pip ns t'
 
     Decode i t -> ('<':).prettyTm letp ns t.('>':)
 

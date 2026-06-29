@@ -1,0 +1,4 @@
+let paradox : ∀ l. U l = 
+  Λ l. U l ;
+
+paradox

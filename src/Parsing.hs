@@ -50,8 +50,8 @@ pAtomBase :: Parser Raw
 pAtomBase =
       withPos (
             (RVar <$> pIdent)
-        <|> (RU . Sz <$> (pKeyword "U" *> decimal))
-        <|> (RU Big <$ pKeyword "Tp")
+        <|> (RU <$> (pKeyword "U" *> pRawSize))
+        <|> (RU RBig <$ pKeyword "Tp")
         <|> (ROne <$ symbol "*")
         <|> (RFst <$> (pKeyword "fst" *> pAtom))
         <|> (RSnd <$> (pKeyword "snd" *> pAtom))
@@ -116,7 +116,14 @@ pData = do
 
 pBinder = pIdent <|> symbol "_"
 
-pSpine  = foldl1 RApp <$> some pAtom
+pSpine :: Parser Raw
+pSpine = do
+  head <- pAtom
+  args <- many (
+          (Right <$> try (symbol "{" *> pRawSize <* symbol "}"))
+      <|> (Left <$> pAtom)
+    )
+  pure $ foldl (\t arg -> case arg of Left u -> RApp t u; Right s -> RLApp t s) head args
 
 pLam = do
   char 'λ' <|> char '\\'
@@ -130,6 +137,25 @@ pPi = do
   pArrow
   cod <- pRaw
   pure $ foldr (\(xs, a) t -> foldr (\x -> RPi x a) t xs) cod dom
+pRawSize = 
+      (ROmega <$ pKeyword "Omega")
+  <|> (RBig <$ pKeyword "Tp")
+  <|> (RSz <$> decimal)
+  <|> (RSzVar <$> pIdent)
+
+pLPi = do
+  symbol "∀" <|> symbol "forall"
+  l <- pBinder
+  symbol "."
+  t <- pRaw
+  pure (RLPi l t)
+
+pLLam = do
+  symbol "Λ" <|> symbol "/\\"
+  l <- pBinder
+  symbol "."
+  t <- pRaw
+  pure (RLAbs l t)
 
 funOrSpine = do
   sp <- pSpine
@@ -147,7 +173,7 @@ pLet = do
   u <- pRaw
   pure $ RLet x a t u
 
-pRaw = withPos (pLam <|> pLet <|> pData <|> try pPi <|> funOrSpine)
+pRaw = withPos (pLPi <|> pLLam <|> pLam <|> pLet <|> pData <|> try pPi <|> funOrSpine)
 pSrc = ws *> pRaw <* eof
 
 parseString :: String -> IO Raw
