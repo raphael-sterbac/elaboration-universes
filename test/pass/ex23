@@ -1,0 +1,15 @@
+data Nat : Tp where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+let Pack : ∀ l. U l + 1 = 
+  Λ l. { Ty : U l, val : Ty } ;
+
+let typePack : Pack {1} = 
+  { Ty = U 0, val = Nat } ;
+
+let extractVal : U 0 = 
+  (typePack).val ;
+
+extractVal

@@ -1,0 +1,14 @@
+let Eq : ∀ l. (A : U l) -> A -> A -> U l+1 = 
+  Λ l. \A x y. (P : A -> U l) -> P x -> P y ;
+
+let refl : ∀ l. (A : U l) -> (x : A) -> Eq {l} A x x = 
+  Λ l. \A x P px. px ;
+
+let sym : ∀ l. (A : U l) -> (x y : A) -> Eq {l} A x y -> Eq {l} A y x = 
+  Λ l. \A x y p Q.
+    p (\z. Q z -> Q x) (\qx. qx) ;
+
+let UEq : ∀ l. Eq {l + 2} (U l + 1) (U l) (U l) = 
+  Λ l. refl {l + 2} (U l + 1) (U l) ;
+
+UEq

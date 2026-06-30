@@ -1,0 +1,21 @@
+data Nat : Tp where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+let NatP : ∀ l. U l + 1 = 
+  Λ l. (N : U l) -> (N -> N) -> N -> N ;
+
+let zeroP : ∀ l. NatP {l} = 
+  Λ l. \N s z. z ;
+
+let succP : ∀ l. NatP {l} -> NatP {l} = 
+  Λ l. \n N s z. s (n N s z) ;
+
+let twoP : ∀ l. NatP {l} = 
+  Λ l. succP {l} (succP {l} (zeroP {l})) ;
+
+let testTwoP : U 1 = 
+  twoP {1} (U 0) (\X. X) Nat ;
+
+testTwoP

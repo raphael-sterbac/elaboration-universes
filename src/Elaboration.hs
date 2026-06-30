@@ -55,6 +55,9 @@ showVal cxt v = showTm cxt $ quoteTm (lvl cxt) v
 showVTy :: Cxt -> VTy -> String
 showVTy cxt v = showTy cxt $ quoteTy (lvl cxt) v
 
+showSize :: Cxt -> VSize -> String
+showSize cxt s = prettySize (map fst (types cxt)) (quoteSize (lvl cxt) s) ""
+
 --------------------------------------------------------------------------------
 
 inferU :: Cxt -> Raw -> M (Tm, Size)
@@ -64,16 +67,13 @@ inferU cxt t = do
     VU i -> pure (t', quoteSize (lvl cxt) i)
     _    -> report cxt "expected a type"
 
-isSmall :: Cxt -> Size -> VTy -> M ()
-isSmall cxt i ty = do
-  let vi = evalSize (env cxt) i
-  case ty of
-    VU j | j < vi -> pure ()
-    VU j -> report cxt ("Universe " ++ showVTy cxt (VU j) ++ " is not small at level " ++ showTy cxt (U i))
+isSmall :: Cxt -> VSize -> VTy -> M ()
+isSmall cxt i = \case
+    VU j | j < i -> pure ()
+    VU j -> report cxt ("Universe " ++ showSize cxt j ++ " is not small at level " ++ showSize cxt i)
 
-    VDecode j _ | j <= vi -> pure ()
-    VDecode j _ -> report cxt ("Decoded type at level " ++ showVTy cxt (VU j) ++ " is not small at level " ++ showTy cxt (U i))
-
+    VDecode j _ | j <= i -> pure ()
+    VDecode j _ -> report cxt ("Decoded type at level " ++ showSize cxt j ++ " is not small at level " ++ showSize cxt i)
     VLPi n a -> isSmall (bindLevel n cxt) i (a (VLVar (lvl cxt)))
 
     VPi n a b -> do
@@ -99,7 +99,7 @@ isSmall cxt i ty = do
     VExt _ _ -> report cxt "Cannot prove smallness: opaque description extension"
     VSquare _ _ _ -> report cxt "Cannot prove smallness: opaque square"
 
-isDescSmall :: Cxt -> Size -> VDesc -> M ()
+isDescSmall :: Cxt -> VSize -> VDesc -> M ()
 isDescSmall cxt i = \case
   VDescTensor d1 d2 -> do
     isDescSmall cxt i d1
@@ -120,7 +120,7 @@ isDescSmall cxt i = \case
   VDescUnit -> pure ()
   VDescVar  -> pure ()
 
-isTupleSmall :: Cxt -> Size -> VTm -> M ()
+isTupleSmall :: Cxt -> VSize -> VTm -> M ()
 isTupleSmall cxt i = \case
   VPair (VDReturn d) rest -> do
       isDescSmall cxt i d
@@ -182,7 +182,9 @@ elabSize cxt = \case
   RSzVar x -> do
     let go i [] = report cxt ("Level variable out of scope: " ++ x)
         go i ((x', _):tys)
-          | x == x'   = pure (LVar (Ix i))
+          | x == x'   = case env cxt !! i of
+                          VESize _ -> pure (LVar (Ix i))
+                          VETm _ -> report cxt ("Expected a level variable, but '" ++ x ++ "' is a term variable.")
           | otherwise = go (i + 1) tys
     go 0 (types cxt)
   RSz i -> pure (Sz i)
@@ -190,23 +192,24 @@ elabSize cxt = \case
   RBig -> pure Big
   ROmega -> pure Omega
 
-checkTy :: Cxt -> Raw -> Size -> M Ty
+checkTy :: Cxt -> Raw -> VSize -> M Ty
 checkTy cxt t size = case t of
   RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
 
   RU s -> do
     s' <- elabSize cxt s
-    if s' < size
-    then pure $ U s'
-    else report cxt ("Size issue: " ++ showTy cxt (U s') ++ " is too large to fit in " ++ showTy cxt (U size))
+    let vs' = evalSize (env cxt) s'
+    if vs' < size then 
+      pure $ U s'
+    else report cxt ("Size issue: U " ++ showSize cxt vs' ++ " is too large to fit in U " ++ showSize cxt size)
 
   RRecord [] -> pure Unit
   RRecord ((x, a):xs) -> do
     -- TODO : Make sure that records indeed live in the right universe
     -- Maybe just the user notation is broken : `let Category : Tp = {}`
     let nextSize = case size of
-          Sz i -> Sz (i + 1)
-          _  -> Omega
+          VSz i -> VSz (i + 1)
+          _  -> VOmega
 
     aTy <- checkTy cxt a nextSize
     let cxt' = bind x (evalTy (env cxt) aTy) cxt
@@ -226,7 +229,8 @@ checkTy cxt t size = case t of
 
   _ -> do
     (tTm, s) <- inferU cxt t
-    if s <= size then
+    let vs = evalSize (env cxt) s
+    if vs <= size then
       pure (Decode s tTm)
     else do
       let ty = Decode s tTm
@@ -255,9 +259,8 @@ check cxt t a = case (t, a) of
     pure $ LAbs l t'
 
   (_, VU s) -> do
-    let sQuote = quoteSize (lvl cxt) s
-    u <- checkTy cxt t sQuote
-    pure $ Code sQuote u
+    u <- checkTy cxt t s
+    pure $ Code (quoteSize (lvl cxt) s) u
 
   (ROne, VUnit) -> pure One
 
@@ -282,7 +285,7 @@ check cxt t a = case (t, a) of
       pure (Pair u1 u2)
 
   (RLet x aTm tTm uTm, a') -> do
-    aTm' <- checkTy cxt aTm Omega
+    aTm' <- checkTy cxt aTm VOmega
     let va = evalTy (env cxt) aTm'
     tTm' <- check cxt tTm va
     let vt = evalTm (env cxt) tTm'
@@ -300,7 +303,7 @@ check cxt t a = case (t, a) of
 elabDataTy :: Cxt -> [(Name, Raw)] -> Raw -> M (Ty, VTy, Size)
 elabDataTy cxt params ty = do
   let tyParams_raw = foldr (\(p, pTy) acc -> RPi p pTy acc) ty params
-  tyParams <- checkTy cxt tyParams_raw Omega
+  tyParams <- checkTy cxt tyParams_raw VOmega
   let vTyParams = evalTy (env cxt) tyParams
 
   let getSize (U s) = s
@@ -314,7 +317,7 @@ elabDataTy cxt params ty = do
 buildParamCxt :: Cxt -> [(Name, Raw)] -> M (Cxt, [Ty])
 buildParamCxt c [] = pure (c, [])
 buildParamCxt c ((p, pTy):ps) = do
-  pTyTm <- checkTy c pTy Omega
+  pTyTm <- checkTy c pTy VOmega
   let vpTy = evalTy (env c) pTyTm
   (c', pTyTms) <- buildParamCxt (bind p vpTy c) ps
   pure (c', pTyTm : pTyTms)
@@ -335,10 +338,10 @@ checkInfRec dName c = \case
   RSrcPos pos t -> checkInfRec dName (c {pos = pos}) t
   RPi z dom cod -> do
     if isRec dName cod then do
-      domTy <- checkTy c dom Omega
+      domTy <- checkTy c dom VOmega
       pure $ Just (DescProd z domTy DescVar)
     else do
-      domTy <- checkTy c dom Omega
+      domTy <- checkTy c dom VOmega
       let vDom = evalTy (env c) domTy
       res <- checkInfRec dName (bind z vDom c) cod
       case res of
@@ -362,7 +365,7 @@ elabConstrDesc dName c = \case
           rest <- elabConstrDesc dName c b
           pure $ DescTensor d_a rest
         Nothing -> do
-          aTy <- checkTy c a Omega
+          aTy <- checkTy c a VOmega
           let va = evalTy (env c) aTy
           rest <- elabConstrDesc dName (bind y va c) b
           pure $ DescSum y aTy rest
@@ -406,7 +409,7 @@ elabConstrs dName params c [] = pure (c, id, [])
 elabConstrs dName params c (((cName, cTyRaw), cTag) : rest) = do
   let fullTyRaw = foldr (\(p, pTy) acc -> RPi p pTy acc) cTyRaw params
 
-  cTyTm <- checkTy c fullTyRaw Omega
+  cTyTm <- checkTy c fullTyRaw VOmega
   let term = elabConstrTm dName cName params cTyRaw cTag
 
   let vcTy = evalTy (env c) cTyTm
@@ -498,7 +501,7 @@ infer cxt = \case
     elabProj cxt tTy tTm x
 
   RRecord fields -> do
-    ty <- checkTy cxt (RRecord fields) Omega
+    ty <- checkTy cxt (RRecord fields) VOmega
     pure (Code Omega ty, VU VOmega)
 
   RRecordVal [] -> pure (One, VUnit)
@@ -537,7 +540,7 @@ infer cxt = \case
       _ -> report cxt "Expected a pair for snd"
 
   RLet x aTm tTm uTm -> do
-    aTm' <- checkTy cxt aTm Omega
+    aTm' <- checkTy cxt aTm VOmega
     let ~va = evalTy (env cxt) aTm'
     tTm' <- check cxt tTm va
     let ~vt = evalTm (env cxt) tTm'

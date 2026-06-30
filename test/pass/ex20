@@ -1,0 +1,12 @@
+data Nat : Tp where {
+  zero : Nat ;
+  succ : Nat -> Nat
+} ;
+
+let Apply : ∀ l. ∀ k. (A : U l) -> (B : U k) -> (A -> B) -> A -> B = 
+  Λ l. Λ k. \A B f x. f x ;
+
+let testApply : U 1 = 
+  Apply {1} {2} (U 0) (U 1) (\X. U 0) Nat ;
+
+testApply

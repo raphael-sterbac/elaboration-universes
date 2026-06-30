@@ -1,0 +1,18 @@
+let Category : ∀ l. U l + 1 = Λ l. {
+  Obj : U l,
+  Hom : Obj -> Obj -> U l,
+  id : (x : Obj) -> Hom x x,
+  comp : (x y z : Obj) -> Hom y z -> Hom x y -> Hom x z
+} ;
+
+let TypeCat : ∀ l. Category {l + 1} = Λ l. {
+  Obj = U l,
+  Hom = \A B. A -> B,
+  id = \A x. x,
+  comp = \A B C f g x. f (g x)
+} ;
+
+let id0 : (A : U 0) -> A -> A =
+  (TypeCat {0}).id ;
+
+id0

@@ -1,0 +1,10 @@
+let id : ∀ l. (A : U l) -> A -> A = 
+  Λ l. \A x. x ;
+
+let idTy0 : U 1 = 
+  (A : U 0) -> A -> A ;
+
+let paradox : U 0 = 
+  id {0} idTy0 (id {0}) ;
+
+paradox

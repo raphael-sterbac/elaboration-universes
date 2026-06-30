@@ -1,0 +1,18 @@
+let ListInterface : ∀ l. U l + 1 = Λ l. {
+  List : U l -> U l,
+  nil : (A : U l) -> List A,
+  cons : (A : U l) -> A -> List A -> List A
+} ;
+
+data List (A : Tp) : Tp where {
+  nil : List A ;
+  cons : A -> List A -> List A
+} ;
+  
+let ListModule : ∀ l. ListInterface {l} = Λ l. 
+  { List = (\X. List (X)), nil = nil, cons = cons } ;
+
+let TypeDocs : ∀ l. (ListModule {l + 2}).List (U l+1) = Λ l.
+  (ListModule {l + 2}).cons (U l+1) (U l) ((ListModule {l + 2}).nil (U l+1)) ;
+
+TypeDocs

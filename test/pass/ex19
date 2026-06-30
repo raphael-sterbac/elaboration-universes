@@ -1,0 +1,13 @@
+let Lift1 : ∀ l. U l+1 -> U l + 2 = 
+  Λ l. \A. A ;
+
+let Lift2 : ∀ l. U l+1 -> U l + 3 = 
+  Λ l. \A. A ;
+
+let testLift : ∀ l. U l + 3 = 
+  Λ l. Lift2 {l} (U l) ;
+
+let doubleLift : ∀ l. (A : U l+1) -> U l + 3 =
+  Λ l. \A. Lift1 {l + 2} (Lift1 {l+1} A) ;
+
+doubleLift

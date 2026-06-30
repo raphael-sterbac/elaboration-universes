@@ -1,0 +1,7 @@
+let Shadow : ∀ l. ∀ l. U l + 1 = 
+  Λ l. Λ l. U l ;
+
+let testShadow : U 6 = 
+  Shadow {0} {5} ;
+
+testShadow

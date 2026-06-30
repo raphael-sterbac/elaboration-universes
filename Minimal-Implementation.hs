@@ -354,9 +354,11 @@ showTy0 a = prettyTy 0 [] a []
 showVal :: Cxt -> VTm -> String
 showVal cxt v = showTm cxt $ quoteTm (lvl cxt) v
 
-
 showVTy :: Cxt -> VTy -> String
 showVTy cxt v = showTy cxt $ quoteTy (lvl cxt) v
+
+showSize :: Cxt -> VSize -> String
+showSize cxt s = prettySize (map fst (types cxt)) (quoteSize (lvl cxt) s) ""
 
 --------------------------------------------------------------------------------
 
@@ -400,7 +402,9 @@ elabSize cxt = \case
   RSzVar x -> do
     let go i [] = report cxt ("Level variable out of scope: " ++ x)
         go i ((x', _):tys)
-          | x == x'   = pure (LVar (Ix i))
+          | x == x'   = case env cxt !! i of
+                          VESize _ -> pure (LVar (Ix i))
+                          VETm _ -> report cxt ("Expected a level variable, but '" ++ x ++ "' is a term variable.")
           | otherwise = go (i + 1) tys
     go 0 (types cxt)
   RSz i -> pure (Sz i)
@@ -408,16 +412,17 @@ elabSize cxt = \case
   RBig -> pure Big
   ROmega -> pure Omega
 
-checkTy :: Cxt -> Raw -> Size -> M Ty
+checkTy :: Cxt -> Raw -> VSize -> M Ty
 checkTy cxt t size = case t of
 
   RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
 
-  RU sRaw -> do
-    s' <- elabSize cxt sRaw
-    if s' < size
+  RU s -> do
+    s' <- elabSize cxt s
+    let vs' = evalSize (env cxt) s'
+    if vs' < size
     then pure $ U s'
-    else report cxt ("Size issue: U " ++ show s' ++ " is too large to fit in " ++ show size)
+    else report cxt ("Size issue: U " ++ showSize cxt vs' ++ " is too large to fit in U " ++ showSize cxt size)
 
   RPi x a b -> do
     a' <- checkTy cxt a size
@@ -433,7 +438,8 @@ checkTy cxt t size = case t of
   -- mode switch
   _ -> do 
     (tTm, s) <- inferU cxt t
-    if s <= size then
+    let vs = evalSize (env cxt) s
+    if vs <= size then
       pure (Decode s tTm)
     else report cxt ("Size issue: got a code at level " ++ show s ++ ", but expected at most " ++ show size)
 
@@ -450,12 +456,11 @@ check cxt t a = case (t, a) of
     pure $ LAbs l t'
 
   (_, VU i) -> do
-    let iQuote = quoteSize (lvl cxt) i
-    u <- checkTy cxt t iQuote
-    pure $ Code iQuote u
+    u <- checkTy cxt t i
+    pure $ Code (quoteSize (lvl cxt) i) u
 
   (RLet x a t u, a') -> do
-    a'Ty <- checkTy cxt a Omega
+    a'Ty <- checkTy cxt a VOmega
     let ~va = evalTy (env cxt) a'Ty
     t'Tm <- check cxt t va
     let ~vt = evalTm (env cxt) t'Tm
@@ -499,7 +504,7 @@ infer cxt = \case
       _ -> report cxt ("Expected a level-polymorphic type for level application, instead inferred:\n\n  " ++ showVTy cxt tTy)
 
   RLet x a t u -> do
-    a'Ty <- checkTy cxt a Omega
+    a'Ty <- checkTy cxt a VOmega
     let ~va = evalTy (env cxt) a'Ty
     t'Tm <- check cxt t va
     let ~vt = evalTm (env cxt) t'Tm
