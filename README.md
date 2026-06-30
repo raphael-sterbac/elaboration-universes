@@ -1,7 +1,7 @@
 # Introduction
 
-This is a minimal implementation of cumulative universe hierarchies for dependent type theory. It uses a new syntax
-to simplify the implementation, first described [here](https://www.jonmsterling.com/01HX/).
+This is a toy implementation of cumulative universe hierarchies for dependent type theory. It uses a new syntax
+to simplify the implementation, first described [here](https://www.jonmsterling.com/01HX/), and presented at [HoTT/UF](https://hott-uf.github.io/2026/slides/sterbac.pdf).
 
 # File architecture
 
