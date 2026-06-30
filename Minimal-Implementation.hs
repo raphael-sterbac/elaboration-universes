@@ -460,12 +460,12 @@ check cxt t a = case (t, a) of
     pure $ Code (quoteSize (lvl cxt) i) u
 
   (RLet x a t u, a') -> do
-    a'Ty <- checkTy cxt a VOmega
-    let ~va = evalTy (env cxt) a'Ty
-    t'Tm <- check cxt t va
-    let ~vt = evalTm (env cxt) t'Tm
-    u'Tm <- check (define x vt va cxt) u a' 
-    pure (Let x a'Ty t'Tm u'Tm)
+    a <- checkTy cxt a VOmega
+    let ~va = evalTy (env cxt) a
+    t <- check cxt t va
+    let ~vt = evalTm (env cxt) t
+    u <- check (define x vt va cxt) u a' 
+    pure (Let x a t u)
 
   -- mode switch
   _ -> do
@@ -504,12 +504,12 @@ infer cxt = \case
       _ -> report cxt ("Expected a level-polymorphic type for level application, instead inferred:\n\n  " ++ showVTy cxt tTy)
 
   RLet x a t u -> do
-    a'Ty <- checkTy cxt a VOmega
-    let ~va = evalTy (env cxt) a'Ty
-    t'Tm <- check cxt t va
-    let ~vt = evalTm (env cxt) t'Tm
-    (u'Tm, uty) <- infer (define x vt va cxt) u  
-    pure (Let x a'Ty t'Tm u'Tm, uty)
+    a <- checkTy cxt a VOmega
+    let ~va = evalTy (env cxt) a
+    t <- check cxt t va
+    let ~vt = evalTm (env cxt) t
+    (u, uty) <- infer (define x vt va cxt) u  
+    pure (Let x a t u, uty)
 
 
   RU {} -> report cxt "Can't infer type for universe"
