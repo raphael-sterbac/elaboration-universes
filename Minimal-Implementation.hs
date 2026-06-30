@@ -203,32 +203,32 @@ evalSize env = \case
 
 evalTm :: Env -> Tm -> VTm
 evalTm env = \case
-  Var (Ix x)    -> case env !! x of
+  Var (Ix x) -> case env !! x of
                      VETm t -> t
                      _ -> error "Evaluation error: Expected a term variable in environment"
-  App t u       -> case (evalTm env t, evalTm env u) of
+  App t u -> case (evalTm env t, evalTm env u) of
                      (VLam _ t, u) -> t u
                      (t       , u) -> VApp t u
-  Lam x t       -> VLam x \v -> evalTm (VETm v:env) t
-  Let x _ t u   -> evalTm (VETm (evalTm env t) : env) u
-  LAbs x t      -> VLAbs x \i -> evalTm (VESize i : env) t
-  LApp t s      -> case evalTm env t of
+  Lam x t -> VLam x \v -> evalTm (VETm v:env) t
+  Let x _ t u -> evalTm (VETm (evalTm env t) : env) u
+  LAbs x t -> VLAbs x \i -> evalTm (VESize i : env) t
+  LApp t s -> case evalTm env t of
                      VLAbs _ f -> f (evalSize env s)
-                     f         -> VLApp f (evalSize env s)
+                     f -> VLApp f (evalSize env s)
 
   -- Case of a Coding
-  Code i a      -> VCode (evalSize env i) (evalTy env a)
+  Code i a -> VCode (evalSize env i) (evalTy env a)
 
 evalTy :: Env -> Ty -> VTy
 evalTy env = \case
-  Pi x a b      -> VPi x (evalTy env a) \v -> evalTy (VETm v:env) b
-  U i           -> VU (evalSize env i)
-  LPi x t       -> VLPi x \i -> evalTy (VESize i : env) t
+  Pi x a b -> VPi x (evalTy env a) \v -> evalTy (VETm v:env) b
+  U i -> VU (evalSize env i)
+  LPi x t -> VLPi x \i -> evalTy (VESize i : env) t
 
   -- Case of a Decoding
-  Decode i t    -> case evalTm env t of
-    VCode j a | evalSize env i == j  -> a             -- Beta Rule for the Universe
-    v                                -> VDecode (evalSize env i) v
+  Decode i t -> case evalTm env t of
+    VCode j a | evalSize env i == j -> a  -- Beta Rule for the Universe
+    v -> VDecode (evalSize env i) v
 
 
 lvl2Ix :: Lvl -> Lvl -> Ix
@@ -244,20 +244,20 @@ quoteSize l = \case
 
 quoteTm :: Lvl -> VTm -> Tm
 quoteTm l = \case
-  VVar x      -> Var (lvl2Ix l x)
-  VApp t u    -> App (quoteTm l t) (quoteTm l u)
-  VLam x t    -> Lam x (quoteTm (l + 1) (t (VVar l)))
-  VLAbs x t   -> LAbs x (quoteTm (l + 1) (t (VLVar l)))
-  VLApp t s   -> LApp (quoteTm l t) (quoteSize l s)
+  VVar x -> Var (lvl2Ix l x)
+  VApp t u -> App (quoteTm l t) (quoteTm l u)
+  VLam x t -> Lam x (quoteTm (l + 1) (t (VVar l)))
+  VLAbs x t -> LAbs x (quoteTm (l + 1) (t (VLVar l)))
+  VLApp t s -> LApp (quoteTm l t) (quoteSize l s)
 
   -- Case of a Coding
-  VCode i a   -> Code (quoteSize l i) (quoteTy l a)
+  VCode i a -> Code (quoteSize l i) (quoteTy l a)
 
 quoteTy :: Lvl -> VTy -> Ty
 quoteTy l = \case
-  VPi  x a b  -> Pi x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
-  VU i        -> U (quoteSize l i)
-  VLPi x t    -> LPi x (quoteTy (l + 1) (t (VLVar l)))
+  VPi  x a b -> Pi x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
+  VU i -> U (quoteSize l i)
+  VLPi x t -> LPi x (quoteTy (l + 1) (t (VLVar l)))
 
   -- Case of a Decoding
   VDecode i t -> Decode (quoteSize l i) (quoteTm l t)

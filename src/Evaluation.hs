@@ -244,19 +244,19 @@ applySquare vd p vm = case vd of
 
 evalTy :: Env -> Ty -> VTy
 evalTy env = \case
-  Pi x a b      -> VPi x (evalTy env a) \v -> evalTy (VETm v : env) b
-  U s           -> VU (evalSize env s)
-  Sigma x a b   -> VSigma x (evalTy env a) \v -> evalTy (VETm v : env) b
-  Tensor a b    -> VTensor (evalTy env a) (evalTy env b)
-  Unit          -> VUnit
+  Pi x a b -> VPi x (evalTy env a) \v -> evalTy (VETm v : env) b
+  U s -> VU (evalSize env s)
+  Sigma x a b -> VSigma x (evalTy env a) \v -> evalTy (VETm v : env) b
+  Tensor a b -> VTensor (evalTy env a) (evalTy env b)
+  Unit -> VUnit
   DLabel (Data n ts) ty -> VDLabel (VData n (map (evalTm env) ts)) (evalTy env ty)
 
   -- Case of a Decoding
-  Decode i t    -> case evalTm env t of
+  Decode i t -> case evalTm env t of
     VCode j a | (evalSize env i) == j -> a
     v                   -> VDecode (evalSize env i) v
 
-  LPi x t       -> VLPi x \i -> evalTy (VESize i : env) t
+  LPi x t -> VLPi x \i -> evalTy (VESize i : env) t
 
   -- Descriptions
   Ext d x -> 
@@ -272,17 +272,17 @@ evalTy env = \case
   Mu d -> VMu env (evalDesc env d)
   
   -- Enumerations
-  EnumU        -> VEnumU
-  EnumT t      -> VEnumT (evalTm env t)
+  EnumU -> VEnumU
+  EnumT t -> VEnumT (evalTm env t)
   SmallPiE t u -> VSmallPiE (evalTm env t) (evalTm env u)
 
 evalDesc :: Env -> Desc -> VDesc
 evalDesc env = \case
-  DescUnit         -> VDescUnit
-  DescVar          -> VDescVar
+  DescUnit -> VDescUnit
+  DescVar -> VDescVar
   DescTensor d1 d2 -> VDescTensor (evalDesc env d1) (evalDesc env d2)
-  DescSum n a d    -> VDescSum n (evalTy env a) \v -> evalDesc (VETm v : env) d
-  DescProd n a d   -> VDescProd n (evalTy env a) \v -> evalDesc (VETm v : env) d
+  DescSum n a d -> VDescSum n (evalTy env a) \v -> evalDesc (VETm v : env) d
+  DescProd n a d -> VDescProd n (evalTy env a) \v -> evalDesc (VETm v : env) d
   DescCall (Data n ts) t -> case (evalTm env t) of
     VDReturn d -> d
     k -> VDescCall (VData n (map (evalTm env) ts)) k
@@ -300,10 +300,10 @@ quoteSize l = \case
 
 quoteTm :: Lvl -> VTm -> Tm
 quoteTm l = \case
-  VVar x      -> Var (lvl2Ix l x)
-  VApp t u    -> App (quoteTm l t) (quoteTm l u)
-  VLam x t    -> Lam x (quoteTm (l + 1) (t (VVar l)))
-  VPair t u   -> Pair (quoteTm l t) (quoteTm l u)
+  VVar x -> Var (lvl2Ix l x)
+  VApp t u -> App (quoteTm l t) (quoteTm l u)
+  VLam x t -> Lam x (quoteTm (l + 1) (t (VVar l)))
+  VPair t u -> Pair (quoteTm l t) (quoteTm l u)
   VDPair x t u -> DPair x (quoteTm l t) (quoteTm l u)
   VOne -> One
   VFst t -> Fst (quoteTm l t)
@@ -333,9 +333,9 @@ quoteTm l = \case
 quoteTy :: Lvl -> VTy -> Ty
 quoteTy l = \case
   VPi  x a b  -> Pi x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
-  VU s        -> U (quoteSize l s)
+  VU s -> U (quoteSize l s)
   VSigma x a b -> Sigma x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
-  VUnit       -> Unit
+  VUnit -> Unit
   VTensor a b -> Tensor (quoteTy l a) (quoteTy l b)
   VDLabel (VData n ts) ty -> DLabel (Data n (map (quoteTm l) ts)) (quoteTy l ty)
   VLPi x t -> LPi x (quoteTy (l+1) (t (VLVar l)))
