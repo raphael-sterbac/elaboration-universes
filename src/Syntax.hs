@@ -16,12 +16,12 @@ data Size = LVar Ix | Sz Int | Succ Size | Big | Omega
 
 data SizeFlattened = FZero Int | FVar Ix Int | FBig | FOmega deriving (Eq)
 
-viewSize :: Size -> SizeFlattened
-viewSize (Sz i) = FZero i
-viewSize (LVar x) = FVar x 0
-viewSize Big = FBig
-viewSize Omega = FOmega
-viewSize (Succ s) = case viewSize s of
+flattenSize :: Size -> SizeFlattened
+flattenSize (Sz i) = FZero i
+flattenSize (LVar x) = FVar x 0
+flattenSize Big = FBig
+flattenSize Omega = FOmega
+flattenSize (Succ s) = case flattenSize s of
   FZero n -> FZero (n + 1)
   FVar x n -> FVar x (n + 1)
   FBig -> FBig     
@@ -29,10 +29,10 @@ viewSize (Succ s) = case viewSize s of
 
 instance Eq Size where
   (==) :: Size -> Size -> Bool
-  s1 == s2 = viewSize s1 == viewSize s2
+  s1 == s2 = flattenSize s1 == flattenSize s2
 
 instance Ord Size where
-  s1 <= s2 = case (viewSize s1, viewSize s2) of
+  s1 <= s2 = case (flattenSize s1, flattenSize s2) of
     (_, FOmega) -> True
     (FOmega, _) -> False
     (_, FBig) -> True

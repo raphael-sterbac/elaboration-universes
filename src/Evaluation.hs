@@ -15,22 +15,22 @@ data VSize = VLVar Lvl | VSz Int | VSucc VSize | VBig | VOmega
 
 data VSizeFlattened = FVZero Int | FVVar Lvl Int | FVBig | FVOmega deriving (Eq)
 
-viewVSize :: VSize -> VSizeFlattened
-viewVSize (VSz i) = FVZero i
-viewVSize (VLVar x) = FVVar x 0
-viewVSize VBig = FVBig
-viewVSize VOmega = FVOmega
-viewVSize (VSucc s) = case viewVSize s of
+flattenVSize :: VSize -> VSizeFlattened
+flattenVSize (VSz i) = FVZero i
+flattenVSize (VLVar x) = FVVar x 0
+flattenVSize VBig = FVBig
+flattenVSize VOmega = FVOmega
+flattenVSize (VSucc s) = case flattenVSize s of
   FVZero n -> FVZero (n + 1)
   FVVar x n -> FVVar x (n + 1)
   FVBig -> FVBig
   FVOmega -> FVOmega
 
 instance Eq VSize where
-  s1 == s2 = viewVSize s1 == viewVSize s2
+  s1 == s2 = flattenVSize s1 == flattenVSize s2
 
 instance Ord VSize where
-  s1 <= s2 = case (viewVSize s1, viewVSize s2) of
+  s1 <= s2 = case (flattenVSize s1, flattenVSize s2) of
     (_, FVOmega) -> True
     (FVOmega, _) -> False
     (_, FVBig) -> True
