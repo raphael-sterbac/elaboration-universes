@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase, BlockArguments, ViewPatterns, TupleSections, StandaloneDeriving, DerivingVia, StrictData #-}
 module Main where
 
 import Prelude hiding (lookup)
@@ -59,14 +60,55 @@ newtype Lvl = Lvl Int deriving (Eq, Show, Num) via Int
 
 type Name = String
 
-type ULvl = Int
+data RawSize = RSzVar Name | RSz Int | RSucc RawSize | RBig | ROmega deriving Show
+data Size = LVar Ix | Sz Int | Succ Size | Big | Omega 
+
+data SizeFlattened = FZero Int | FVar Ix Int | FBig | FOmega deriving (Eq)
+
+flattenSize :: Size -> SizeFlattened
+flattenSize (Sz i) = FZero i
+flattenSize (LVar x) = FVar x 0
+flattenSize Big = FBig
+flattenSize Omega = FOmega
+flattenSize (Succ s) = case flattenSize s of
+  FZero n -> FZero (n + 1)
+  FVar x n -> FVar x (n + 1)
+  FBig -> FBig     
+  FOmega -> FOmega  
+
+instance Eq Size where
+  (==) :: Size -> Size -> Bool
+  s1 == s2 = flattenSize s1 == flattenSize s2
+
+instance Ord Size where
+  s1 <= s2 = case (flattenSize s1, flattenSize s2) of
+    (_, FOmega) -> True
+    (FOmega, _) -> False
+    (_, FBig) -> True
+    (FBig, _) -> False
+    (FZero n, FZero m) -> n <= m
+    (FZero n, FVar _ m) -> n <= m
+    (FVar _ _, FZero _) -> False
+    (FVar x n, FVar y m) -> x == y && n <= m
+    
+  s1 < s2 = s1 <= s2 && not (s2 <= s1)
+
+instance Show Size where
+  show (LVar i) = show i
+  show (Sz i) = show i
+  show (Succ s) = show s ++ " + 1"
+  show Big    = "Tp"
+  show Omega  = "Omega"
 
 data Raw
   = RVar Name              -- x
   | RLam Name Raw          -- \x. t
   | RApp Raw Raw           -- t u
-  | RU ULvl                -- U i
+  | RU RawSize             -- U i
   | RPi Name Raw Raw       -- (x : A) -> B
+  | RLPi Name Raw          -- ∀ l. A
+  | RLAbs Name Raw         -- Λ l. t
+  | RLApp Raw RawSize      -- t {s}
   | RLet Name Raw Raw Raw  -- let x : A = t in u
   | RSrcPos SourcePos Raw  -- source position for error reporting
   deriving Show
@@ -76,76 +118,149 @@ data Raw
 
 data Ty
   = Pi Name ~Ty Ty
-    | U ULvl 
-    | Decode ULvl Tm
+    | U Size 
+    | Decode Size Tm
+    | LPi Name Ty
 
 data Tm
   = Var Ix
   | App Tm ~Tm
-  | Code Int Ty
+  | Code Size Ty
   | Lam Name Tm
   | Let Name Ty Tm Tm
+  | LAbs Name Tm
+  | LApp Tm Size
 
 -- values
 ------------------------------------------------------------
 
-type Env = [VTm]
+data VSize = VLVar Lvl | VSz Int | VSucc VSize | VBig | VOmega 
+
+data VSizeFlattened = FVZero Int | FVVar Lvl Int | FVBig | FVOmega deriving (Eq)
+
+flattenVSize :: VSize -> VSizeFlattened
+flattenVSize (VSz i) = FVZero i
+flattenVSize (VLVar x) = FVVar x 0
+flattenVSize VBig = FVBig
+flattenVSize VOmega = FVOmega
+flattenVSize (VSucc s) = case flattenVSize s of
+  FVZero n -> FVZero (n + 1)
+  FVVar x n -> FVVar x (n + 1)
+  FVBig -> FVBig
+  FVOmega -> FVOmega
+
+instance Eq VSize where
+  s1 == s2 = flattenVSize s1 == flattenVSize s2
+
+instance Ord VSize where
+  s1 <= s2 = case (flattenVSize s1, flattenVSize s2) of
+    (_, FVOmega) -> True
+    (FVOmega, _) -> False
+    (_, FVBig) -> True
+    (FVBig, _) -> False
+    (FVZero n, FVZero m) -> n <= m
+    (FVZero n, FVVar _ m) -> n <= m
+    (FVVar _ _, FVZero _) -> False
+    (FVVar x n, FVVar y m) -> x == y && n <= m
+    
+  s1 < s2 = s1 <= s2 && not (s2 <= s1)
+
+instance Show VSize where
+  show (VLVar i) = show i
+  show (VSz i) = show i
+  show (VSucc s) = show s ++ " + 1"
+  show VBig    = "Tp"
+  show VOmega  = "Omega"
+
+data VEnvVal = VETm VTm | VESize VSize
+type Env = [VEnvVal]
 
 data VTy
   = VPi Name ~VTy (VTm -> VTy)
-    | VU Int 
-    | VDecode ULvl VTm
+    | VU VSize 
+    | VDecode VSize VTm
+    | VLPi Name (VSize -> VTy)
 
 data VTm
   = VVar Lvl
   | VApp VTm ~VTm
-  | VCode ULvl VTy
+  | VCode VSize VTy
   | VLam Name (VTm -> VTm)
+  | VLAbs Name (VSize -> VTm)
+  | VLApp VTm VSize
 
 --------------------------------------------------------------------------------
 
+evalSize :: Env -> Size -> VSize
+evalSize env = \case
+  LVar (Ix x) -> case env !! x of
+    VESize s -> s
+    _ -> error "Evaluation error: Expected a level variable in environment"
+  Sz i -> VSz i 
+  Succ s -> VSucc (evalSize env s)
+  Big -> VBig
+  Omega -> VOmega
+
 evalTm :: Env -> Tm -> VTm
 evalTm env = \case
-  Var (Ix x)    -> env !! x
+  Var (Ix x)    -> case env !! x of
+                     VETm t -> t
+                     _ -> error "Evaluation error: Expected a term variable in environment"
   App t u       -> case (evalTm env t, evalTm env u) of
                      (VLam _ t, u) -> t u
                      (t       , u) -> VApp t u
-  Lam x t       -> VLam x \v -> evalTm (v:env) t
-  Let x _ t u -> evalTm (evalTm env t : env) u
+  Lam x t       -> VLam x \v -> evalTm (VETm v:env) t
+  Let x _ t u   -> evalTm (VETm (evalTm env t) : env) u
+  LAbs x t      -> VLAbs x \i -> evalTm (VESize i : env) t
+  LApp t s      -> case evalTm env t of
+                     VLAbs _ f -> f (evalSize env s)
+                     f         -> VLApp f (evalSize env s)
 
   -- Case of a Coding
-  Code i a      -> VCode i (evalTy env a)
+  Code i a      -> VCode (evalSize env i) (evalTy env a)
 
 evalTy :: Env -> Ty -> VTy
 evalTy env = \case
-  Pi x a b      -> VPi x (evalTy env a) \v -> evalTy (v:env) b
-  U i           -> VU i
+  Pi x a b      -> VPi x (evalTy env a) \v -> evalTy (VETm v:env) b
+  U i           -> VU (evalSize env i)
+  LPi x t       -> VLPi x \i -> evalTy (VESize i : env) t
 
   -- Case of a Decoding
   Decode i t    -> case evalTm env t of
-    VCode j a | i == j  -> a             -- Beta Rule for the Universe
-    v                   -> VDecode i v
+    VCode j a | evalSize env i == j  -> a             -- Beta Rule for the Universe
+    v                                -> VDecode (evalSize env i) v
 
 
 lvl2Ix :: Lvl -> Lvl -> Ix
 lvl2Ix (Lvl l) (Lvl x) = Ix (l - x - 1)
+
+quoteSize :: Lvl -> VSize -> Size
+quoteSize l = \case
+  VLVar x -> LVar (lvl2Ix l x)
+  VSz i -> Sz i
+  VSucc s -> Succ (quoteSize l s)
+  VBig -> Big
+  VOmega -> Omega
 
 quoteTm :: Lvl -> VTm -> Tm
 quoteTm l = \case
   VVar x      -> Var (lvl2Ix l x)
   VApp t u    -> App (quoteTm l t) (quoteTm l u)
   VLam x t    -> Lam x (quoteTm (l + 1) (t (VVar l)))
+  VLAbs x t   -> LAbs x (quoteTm (l + 1) (t (VLVar l)))
+  VLApp t s   -> LApp (quoteTm l t) (quoteSize l s)
 
   -- Case of a Coding
-  VCode i a   -> Code i (quoteTy l a)
+  VCode i a   -> Code (quoteSize l i) (quoteTy l a)
 
 quoteTy :: Lvl -> VTy -> Ty
 quoteTy l = \case
   VPi  x a b  -> Pi x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
-  VU i        -> U i
+  VU i        -> U (quoteSize l i)
+  VLPi x t    -> LPi x (quoteTy (l + 1) (t (VLVar l)))
 
   -- Case of a Decoding
-  VDecode i t -> Decode i (quoteTm l t)
+  VDecode i t -> Decode (quoteSize l i) (quoteTm l t)
 
 nf :: Env -> Tm -> Tm
 nf env t = quoteTm (Lvl (length env)) (evalTm env t)
@@ -162,6 +277,9 @@ convTm l t u = case (t, u) of
 
   (VVar x  , VVar x'   ) -> x == x'
   (VApp t u, VApp t' u') -> convTm l t t' && convTm l u u'
+  
+  (VLAbs _ t, VLAbs _ t') -> convTm (l + 1) (t (VLVar l)) (t' (VLVar l))
+  (VLApp t s, VLApp t' s') -> convTm l t t' && s == s'
 
   (VCode i a, VCode j b) | i == j -> convTy l a b
 
@@ -174,6 +292,8 @@ convTy l t u = case (t, u) of
   (VPi _ a b, VPi _ a' b') ->
        convTy l a a'
     && convTy (l + 1) (b (VVar l)) (b' (VVar l))
+    
+  (VLPi _ a, VLPi _ a') -> convTy (l + 1) (a (VLVar l)) (a' (VLVar l))
 
   (VDecode i a, VDecode j b) | i == j -> convTm l a b
 
@@ -195,12 +315,16 @@ emptyCxt = Cxt [] [] 0
 -- Extend Cxt with a bound variable
 bind :: Name -> VTy -> Cxt -> Cxt
 bind x ~a (Cxt env types l pos) =
-  Cxt (VVar l:env) ((x, a):types) (l + 1) pos
+  Cxt (VETm (VVar l):env) ((x, a):types) (l + 1) pos
 
+bindLevel :: Name -> Cxt -> Cxt
+bindLevel x (Cxt env types l pos) =
+  Cxt (VESize (VLVar l):env) ((x, VU (VSz 0)):types) (l + 1) pos
+  
 -- Extend Cxt with a definition
 define :: Name -> VTm -> VTy -> Cxt -> Cxt
 define x ~t ~a (Cxt env types l pos) =
-  Cxt (t:env) ((x, a):types) (l + 1) pos
+  Cxt (VETm t:env) ((x, a):types) (l + 1) pos
 
 -- Typechecking monad, We annotate the error with the current source position
 type M = Either (String, SourcePos)
@@ -240,18 +364,18 @@ vApp :: VTm -> VTm -> VTm
 vApp (VLam _ f) v = f v
 vApp f          v = VApp f v
 
-inferU :: Cxt -> Raw -> M (Tm, Int)
+inferU :: Cxt -> Raw -> M (Tm, Size)
 inferU cxt t = do
   (t, a) <- infer cxt t
   case a of
-    VU i -> pure (t, i)
+    VU i -> pure (t, quoteSize (lvl cxt) i)
     _    -> report cxt "expected a type"
 
 
 coe :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
 coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
   (VU i, VU j) | i <= j -> 
-    pure $ Code j (Decode i m)
+    pure $ Code (quoteSize (lvl cxt) j) (Decode (quoteSize (lvl cxt) i) m)
 
   (VPi n1 a1 b1, VPi n2 a2 b2) -> do
     let cxt' = bind n2 a2 cxt
@@ -271,31 +395,47 @@ coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
     if convTy l sourceTy targetTy then pure m 
     else report cxt "Error: Invalid coercion"
 
-checkTy :: Cxt -> Raw -> Maybe ULvl -> M Ty
+elabSize :: Cxt -> RawSize -> M Size
+elabSize cxt = \case
+  RSzVar x -> do
+    let go i [] = report cxt ("Level variable out of scope: " ++ x)
+        go i ((x', _):tys)
+          | x == x'   = pure (LVar (Ix i))
+          | otherwise = go (i + 1) tys
+    go 0 (types cxt)
+  RSz i -> pure (Sz i)
+  RSucc s -> Succ <$> elabSize cxt s
+  RBig -> pure Big
+  ROmega -> pure Omega
+
+checkTy :: Cxt -> Raw -> Size -> M Ty
 checkTy cxt t size = case t of
 
   RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
 
-  RU i -> case size of 
-    Nothing -> pure $ U i
-    Just j | i < j -> pure $ U i
-    Just k -> report cxt ("Size issue: U " ++ show i ++ ", but expected a universe in U " ++ show k)
+  RU sRaw -> do
+    s' <- elabSize cxt sRaw
+    if s' < size
+    then pure $ U s'
+    else report cxt ("Size issue: U " ++ show s' ++ " is too large to fit in " ++ show size)
 
   RPi x a b -> do
     a' <- checkTy cxt a size
     let cxt' = bind x (evalTy (env cxt) a') cxt
     b' <- checkTy cxt' b size
     pure $ Pi x a' b'
+    
+  RLPi l a -> do
+    let cxt' = bindLevel l cxt
+    a' <- checkTy cxt' a size
+    pure $ LPi l a'
 
   -- mode switch
   _ -> do 
-    (t, a) <- infer cxt t
-    case a of
-      VU i -> case size of 
-        Nothing -> pure (Decode i t)
-        Just j | i <= j -> pure (Decode i t)
-        Just k -> report cxt ("Size issue: got a code at level " ++ show i ++ ", but expected  " ++ show k)
-      _    -> report cxt "Elaboration error: Expected a code"
+    (tTm, s) <- inferU cxt t
+    if s <= size then
+      pure (Decode s tTm)
+    else report cxt ("Size issue: got a code at level " ++ show s ++ ", but expected at most " ++ show size)
 
 check :: Cxt -> Raw -> VTy -> M Tm
 check cxt t a = case (t, a) of
@@ -304,17 +444,23 @@ check cxt t a = case (t, a) of
   (RLam x t, VPi x' a b) ->
     Lam x <$> check (bind x a cxt) t (b (VVar (lvl cxt)))
 
+  (RLAbs l t, VLPi _ b) -> do
+    let cxt' = bindLevel l cxt
+    t' <- check cxt' t (b (VLVar (lvl cxt)))
+    pure $ LAbs l t'
+
   (_, VU i) -> do
-    u <- checkTy cxt t (Just i)
-    pure $ Code i u
+    let iQuote = quoteSize (lvl cxt) i
+    u <- checkTy cxt t iQuote
+    pure $ Code iQuote u
 
   (RLet x a t u, a') -> do
-    a <- checkTy cxt a Nothing
-    let ~va = evalTy (env cxt) a
-    t <- check cxt t va
-    let ~vt = evalTm (env cxt) t
-    u <- check (define x vt va cxt) u a' 
-    pure (Let x a t u)
+    a'Ty <- checkTy cxt a Omega
+    let ~va = evalTy (env cxt) a'Ty
+    t'Tm <- check cxt t va
+    let ~vt = evalTm (env cxt) t'Tm
+    u'Tm <- check (define x vt va cxt) u a' 
+    pure (Let x a'Ty t'Tm u'Tm)
 
   -- mode switch
   _ -> do
@@ -328,31 +474,44 @@ infer cxt = \case
   RVar x -> do
     let go i [] = report cxt ("variable out of scope: " ++ x)
         go i ((x', a):tys)
-          | x == x'   = pure (Var i, a)
+          | x == x'   = case env cxt !! i of
+                          VETm _ -> pure (Var (Ix i), a)
+                          VESize _ -> report cxt ("Expected a term variable, but '" ++ x ++ "' is a level variable.")
           | otherwise = go (i + 1) tys
     go 0 (types cxt)
 
   RApp t u -> do
-    (t, tty) <- infer cxt t
+    (t', tty) <- infer cxt t
     case tty of
       VPi _ a b -> do
-        u <- check cxt u a
-        pure (App t u, b (evalTm (env cxt) u))
+        u' <- check cxt u a
+        pure (App t' u', b (evalTm (env cxt) u'))
       tty ->
         report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt tty
 
+  RLApp t s -> do
+    (tTm, tTy) <- infer cxt t
+    case tTy of
+      VLPi _ b -> do
+        sz <- elabSize cxt s
+        let vsz = evalSize (env cxt) sz
+        pure (LApp tTm sz, b vsz)
+      _ -> report cxt ("Expected a level-polymorphic type for level application, instead inferred:\n\n  " ++ showVTy cxt tTy)
+
   RLet x a t u -> do
-    a <- checkTy cxt a Nothing
-    let ~va = evalTy (env cxt) a
-    t <- check cxt t va
-    let ~vt = evalTm (env cxt) t
-    (u, uty) <- infer (define x vt va cxt) u  
-    pure (Let x a t u, uty)
+    a'Ty <- checkTy cxt a Omega
+    let ~va = evalTy (env cxt) a'Ty
+    t'Tm <- check cxt t va
+    let ~vt = evalTm (env cxt) t'Tm
+    (u'Tm, uty) <- infer (define x vt va cxt) u  
+    pure (Let x a'Ty t'Tm u'Tm, uty)
 
 
   RU {} -> report cxt "Can't infer type for universe"
   RPi {} -> report cxt "Can't infer type for product type"
   RLam {} -> report cxt "Can't infer type for lambda expression."
+  RLPi {} -> report cxt "Can't infer type for level product type"
+  RLAbs {} -> report cxt "Can't infer type for level abstraction"
 
 
 -- printing
@@ -376,13 +535,27 @@ letp  = 0  :: Int -- let, lambda
 par :: Int -> Int -> ShowS -> ShowS
 par p p' = showParen (p' < p)
 
+prettySize :: [Name] -> Size -> ShowS
+prettySize ns = \case
+  LVar (Ix x) -> 
+    if x < 0 || x >= length ns then 
+      (("l" ++ show x) ++)
+    else 
+      ((ns !! x) ++)
+  Sz i -> (show i ++)
+  Succ s -> prettySize ns s . (" + 1"++)
+  Big -> ("Tp"++)
+  Omega -> ("Omega"++)
+
 prettyTm :: Int -> [Name] -> Tm -> ShowS
 prettyTm = goTm where
 
   goTm :: Int -> [Name] -> Tm -> ShowS
   goTm p ns = \case
     Var (Ix x) ->
-      case ns !! x of
+      if x < 0 || x >= length ns then 
+        (("Free" ++ show x) ++)
+      else case ns !! x of
         "_"   -> ("@"++).(show x++)
         n     -> (n++)
 
@@ -393,6 +566,14 @@ prettyTm = goTm where
                                      (' ':) . (x++) . goLam (x:ns) t
                                    goLam ns t =
                                      (". "++) . goTm letp ns t
+
+    LAbs (fresh ns -> x) t    -> par p letp $ ("Λ "++) . (x++) . goLAbs (x:ns) t where
+                                   goLAbs ns (LAbs (fresh ns -> x) t') =
+                                     (' ':) . (x++) . goLAbs (x:ns) t'
+                                   goLAbs ns t' =
+                                     (". "++) . goTm letp ns t'
+
+    LApp t s                  -> par p appp $ goTm appp ns t . (" {"++) . prettySize ns s . ("}"++)
 
     Code i t -> ('[':).prettyTy letp ns t.(']':)
 
@@ -407,7 +588,7 @@ prettyTy = goTy where
 
   goTy :: Int -> [Name] -> Ty -> ShowS
   goTy p ns = \case    
-    U i                       -> par p appp $ ("U "++).(show i++)
+    U i                       -> par p appp $ ("U "++).prettySize ns i
 
     Pi "_" a b                -> par p pip $ goTy appp ns a . (" → "++) . goTy pip ("_":ns) b
 
@@ -416,6 +597,12 @@ prettyTy = goTy where
                                                           . (" → "++) . goTy pip ("_":ns) b
                                    goPi ns (Pi x a b)   = piBind ns x a . goPi (x:ns) b
                                    goPi ns b            = (" → "++) . goTy pip ns b
+
+    LPi (fresh ns -> x) t     -> par p pip $ ("∀ "++) . (x++) . goLPi (x:ns) t where
+                                   goLPi ns (LPi (fresh ns -> x) t') =
+                                     (' ':) . (x++) . goLPi (x:ns) t'
+                                   goLPi ns t' =
+                                     (". "++) . goTy pip ns t'
 
     Decode i t   -> ('<':).prettyTm letp ns t.('>':)
 
@@ -441,7 +628,7 @@ pArrow   = symbol "→" <|> symbol "->"
 decimal  = lexeme L.decimal
 
 keyword :: String -> Bool
-keyword x = x == "let" || x == "λ" || x == "U" 
+keyword x = x `elem` ["let", "λ", "U", "Tp", "Omega", "forall"]
 
 pIdent :: Parser Name
 pIdent = try $ do
@@ -454,18 +641,40 @@ pKeyword kw = do
   C.string kw
   (takeWhile1P Nothing isAlphaNum *> empty) <|> ws
 
+pRawSizeAtom :: Parser RawSize
+pRawSizeAtom = 
+      (ROmega <$ pKeyword "Omega")
+  <|> (RBig <$ pKeyword "Tp")
+  <|> (RSz <$> decimal)
+  <|> (RSzVar <$> pIdent)
+  <|> parens pRawSize
+
+pRawSize :: Parser RawSize
+pRawSize = do
+  base <- pRawSizeAtom
+  pluses <- many (symbol "+" *> decimal)
+  pure $ foldl (\s n -> iterate RSucc s !! n) base pluses
+
 pAtom :: Parser Raw
 pAtom =
       withPos (
             (RVar <$> pIdent)
-        <|> (RU <$> (pKeyword "U" *> decimal))
+        <|> (RU <$> (pKeyword "U" *> pRawSize))
+        <|> (RU RBig <$ pKeyword "Tp")
       )
   <|> parens pRaw
 
 pBinder = pIdent <|> symbol "_"
 
 
-pSpine  = foldl1 RApp <$> some pAtom
+pSpine :: Parser Raw
+pSpine = do
+  head <- pAtom
+  args <- many (
+          (Right <$> try (symbol "{" *> pRawSize <* symbol "}"))
+      <|> (Left <$> pAtom)
+    )
+  pure $ foldl (\t arg -> case arg of Left u -> RApp t u; Right s -> RLApp t s) head args
 
 pLam = do
   char 'λ' <|> char '\\'
@@ -479,6 +688,20 @@ pPi = do
   pArrow
   cod <- pRaw
   pure $ foldr (\(xs, a) t -> foldr (\x -> RPi x a) t xs) cod dom
+
+pLPi = do
+  symbol "∀" <|> symbol "forall"
+  l <- pBinder
+  symbol "."
+  t <- pRaw
+  pure (RLPi l t)
+
+pLLam = do
+  symbol "Λ" <|> symbol "/\\"
+  l <- pBinder
+  symbol "."
+  t <- pRaw
+  pure (RLAbs l t)
 
 funOrSpine = do
   sp <- pSpine
@@ -497,7 +720,7 @@ pLet = do
   u <- pRaw
   pure $ RLet x a t u
 
-pRaw = withPos (pLam <|> pLet <|> try pPi <|> funOrSpine)
+pRaw = withPos (pLPi <|> pLLam <|> pLam <|> pLet <|> try pPi <|> funOrSpine)
 pSrc = ws *> pRaw <* eof
 
 parseString :: String -> IO Raw
