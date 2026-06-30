@@ -186,6 +186,7 @@ elabSize cxt = \case
           | otherwise = go (i + 1) tys
     go 0 (types cxt)
   RSz i -> pure (Sz i)
+  RSucc s -> Succ <$> elabSize cxt s
   RBig -> pure Big
   ROmega -> pure Omega
 

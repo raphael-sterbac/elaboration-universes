@@ -1,8 +1,3 @@
-data Nat : Tp where {
-  zero : Nat ;
-  succ : Nat -> Nat
-} ;
-
 let id : ∀ l. (A : U l) -> A -> A = 
   Λ l. \A x. x ;
 
@@ -12,7 +7,7 @@ let smallId : (A : U 0) -> A -> A =
 let largeId : (A : Tp) -> A -> A = 
   id {Tp} ;
 
-let cumul : ∀ l. U 0 -> U l = 
+let cumul : ∀ l. U 1 -> U l+1 = 
   Λ l. \X. X ;
 
-cumul {Tp} (Nat)
+cumul {Tp} (U 0)

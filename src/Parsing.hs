@@ -137,11 +137,18 @@ pPi = do
   pArrow
   cod <- pRaw
   pure $ foldr (\(xs, a) t -> foldr (\x -> RPi x a) t xs) cod dom
-pRawSize = 
+
+pRawSizeAtom = 
       (ROmega <$ pKeyword "Omega")
   <|> (RBig <$ pKeyword "Tp")
   <|> (RSz <$> decimal)
   <|> (RSzVar <$> pIdent)
+  <|> parens pRawSize
+
+pRawSize = do
+  base <- pRawSizeAtom
+  pluses <- many (symbol "+" *> decimal)
+  pure $ foldl (\s n -> iterate RSucc s !! n) base pluses
 
 pLPi = do
   symbol "∀" <|> symbol "forall"

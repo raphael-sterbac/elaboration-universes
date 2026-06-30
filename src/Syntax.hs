@@ -1,3 +1,4 @@
+{-# LANGUAGE InstanceSigs #-}
 module Syntax where
 
 import Prelude hiding (lookup)
@@ -10,30 +11,43 @@ newtype Ix  = Ix  Int deriving (Eq, Show, Num) via Int
 -- De Bruijn level.
 newtype Lvl = Lvl Int deriving (Eq, Show, Num) via Int
 
-data RawSize = RSzVar Name | RSz Int | RBig | ROmega deriving Show
-data Size = LVar Ix | Sz Int | Big | Omega deriving (Eq)
+data RawSize = RSzVar Name | RSz Int | RSucc RawSize | RBig | ROmega deriving Show
+data Size = LVar Ix | Sz Int | Succ Size | Big | Omega 
+
+data SizeFlattened = FZero Int | FVar Ix Int | FBig | FOmega deriving (Eq)
+
+viewSize :: Size -> SizeFlattened
+viewSize (Sz i) = FZero i
+viewSize (LVar x) = FVar x 0
+viewSize Big = FBig
+viewSize Omega = FOmega
+viewSize (Succ s) = case viewSize s of
+  FZero n -> FZero (n + 1)
+  FVar x n -> FVar x (n + 1)
+  FBig -> FBig     
+  FOmega -> FOmega  
+
+instance Eq Size where
+  (==) :: Size -> Size -> Bool
+  s1 == s2 = viewSize s1 == viewSize s2
 
 instance Ord Size where
-  Sz i <= Sz j = i <= j
-  Sz _ <= Big = True
-  Sz _ <= Omega = True
-  LVar _ <= Big = True
-  Sz 0 <= LVar _ = True 
-  Big <= Big = True
-  Big <= Omega = True
-  Omega <= Omega = True
-  _ <= _ = False
-
-  Sz i < Sz j = i < j
-  Sz _ < Big = True
-  Sz _ < Omega = True
-  LVar _ < Omega = True
-  Big < Omega = True
-  _ < _ = False
+  s1 <= s2 = case (viewSize s1, viewSize s2) of
+    (_, FOmega) -> True
+    (FOmega, _) -> False
+    (_, FBig) -> True
+    (FBig, _) -> False
+    (FZero n, FZero m) -> n <= m
+    (FZero n, FVar _ m) -> n <= m
+    (FVar _ _, FZero _) -> False
+    (FVar x n, FVar y m) -> x == y && n <= m
+    
+  s1 < s2 = s1 <= s2 && not (s2 <= s1)
 
 instance Show Size where
   show (LVar i) = show i
   show (Sz i) = show i
+  show (Succ s) = show s ++ " + 1"
   show Big    = "Tp"
   show Omega  = "Omega"
 

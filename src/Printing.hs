@@ -29,6 +29,7 @@ prettySize ns = \case
     else 
       ((ns !! x) ++)
   Sz i -> (show i ++)
+  Succ s -> prettySize ns s . (" + 1"++)
   Big -> ("Tp"++)
   Omega -> ("Omega"++)
 
