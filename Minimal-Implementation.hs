@@ -60,21 +60,17 @@ newtype Lvl = Lvl Int deriving (Eq, Show, Num) via Int
 
 type Name = String
 
-data RawSize = RSzVar Name | RSz Int | RSucc RawSize | RBig | ROmega deriving Show
-data Size = LVar Ix | Sz Int | Succ Size | Big | Omega 
+data RawSize = RSzVar Name | RSz Int | RSucc RawSize deriving Show
+data Size = LVar Ix | Sz Int | Succ Size 
 
-data SizeFlattened = FZero Int | FVar Ix Int | FBig | FOmega deriving (Eq)
+data SizeFlattened = FZero Int | FVar Ix Int deriving (Eq)
 
 flattenSize :: Size -> SizeFlattened
 flattenSize (Sz i) = FZero i
 flattenSize (LVar x) = FVar x 0
-flattenSize Big = FBig
-flattenSize Omega = FOmega
 flattenSize (Succ s) = case flattenSize s of
   FZero n -> FZero (n + 1)
-  FVar x n -> FVar x (n + 1)
-  FBig -> FBig     
-  FOmega -> FOmega  
+  FVar x n -> FVar x (n + 1)  
 
 instance Eq Size where
   (==) :: Size -> Size -> Bool
@@ -82,10 +78,6 @@ instance Eq Size where
 
 instance Ord Size where
   s1 <= s2 = case (flattenSize s1, flattenSize s2) of
-    (_, FOmega) -> True
-    (FOmega, _) -> False
-    (_, FBig) -> True
-    (FBig, _) -> False
     (FZero n, FZero m) -> n <= m
     (FZero n, FVar _ m) -> n <= m
     (FVar _ _, FZero _) -> False
@@ -97,8 +89,6 @@ instance Show Size where
   show (LVar i) = show i
   show (Sz i) = show i
   show (Succ s) = show s ++ " + 1"
-  show Big    = "Tp"
-  show Omega  = "Omega"
 
 data Raw
   = RVar Name              -- x
@@ -134,30 +124,22 @@ data Tm
 -- values
 ------------------------------------------------------------
 
-data VSize = VLVar Lvl | VSz Int | VSucc VSize | VBig | VOmega 
+data VSize = VLVar Lvl | VSz Int | VSucc VSize
 
-data VSizeFlattened = FVZero Int | FVVar Lvl Int | FVBig | FVOmega deriving (Eq)
+data VSizeFlattened = FVZero Int | FVVar Lvl Int deriving (Eq)
 
 flattenVSize :: VSize -> VSizeFlattened
 flattenVSize (VSz i) = FVZero i
 flattenVSize (VLVar x) = FVVar x 0
-flattenVSize VBig = FVBig
-flattenVSize VOmega = FVOmega
 flattenVSize (VSucc s) = case flattenVSize s of
   FVZero n -> FVZero (n + 1)
   FVVar x n -> FVVar x (n + 1)
-  FVBig -> FVBig
-  FVOmega -> FVOmega
 
 instance Eq VSize where
   s1 == s2 = flattenVSize s1 == flattenVSize s2
 
 instance Ord VSize where
   s1 <= s2 = case (flattenVSize s1, flattenVSize s2) of
-    (_, FVOmega) -> True
-    (FVOmega, _) -> False
-    (_, FVBig) -> True
-    (FVBig, _) -> False
     (FVZero n, FVZero m) -> n <= m
     (FVZero n, FVVar _ m) -> n <= m
     (FVVar _ _, FVZero _) -> False
@@ -169,8 +151,6 @@ instance Show VSize where
   show (VLVar i) = show i
   show (VSz i) = show i
   show (VSucc s) = show s ++ " + 1"
-  show VBig    = "Tp"
-  show VOmega  = "Omega"
 
 data VEnvVal = VETm VTm | VESize VSize
 type Env = [VEnvVal]
@@ -198,8 +178,6 @@ evalSize env = \case
     _ -> error "Evaluation error: Expected a level variable in environment"
   Sz i -> VSz i 
   Succ s -> VSucc (evalSize env s)
-  Big -> VBig
-  Omega -> VOmega
 
 evalTm :: Env -> Tm -> VTm
 evalTm env = \case
@@ -239,8 +217,6 @@ quoteSize l = \case
   VLVar x -> LVar (lvl2Ix l x)
   VSz i -> Sz i
   VSucc s -> Succ (quoteSize l s)
-  VBig -> Big
-  VOmega -> Omega
 
 quoteTm :: Lvl -> VTm -> Tm
 quoteTm l = \case
@@ -366,14 +342,6 @@ vApp :: VTm -> VTm -> VTm
 vApp (VLam _ f) v = f v
 vApp f          v = VApp f v
 
-inferU :: Cxt -> Raw -> M (Tm, Size)
-inferU cxt t = do
-  (t, a) <- infer cxt t
-  case a of
-    VU i -> pure (t, quoteSize (lvl cxt) i)
-    _    -> report cxt "expected a type"
-
-
 coe :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
 coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
   (VU i, VU j) | i <= j -> 
@@ -409,20 +377,21 @@ elabSize cxt = \case
     go 0 (types cxt)
   RSz i -> pure (Sz i)
   RSucc s -> Succ <$> elabSize cxt s
-  RBig -> pure Big
-  ROmega -> pure Omega
 
-checkTy :: Cxt -> Raw -> VSize -> M Ty
+checkTy :: Cxt -> Raw -> Maybe VSize -> M Ty
 checkTy cxt t size = case t of
 
   RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
 
   RU s -> do
-    s' <- elabSize cxt s
-    let vs' = evalSize (env cxt) s'
-    if vs' < size
-    then pure $ U s'
-    else report cxt ("Size issue: U " ++ showSize cxt vs' ++ " is too large to fit in U " ++ showSize cxt size)
+    s <- elabSize cxt s
+    case size of
+      Nothing -> pure $ U s
+      Just sz -> do
+        let vs = evalSize (env cxt) s 
+        if vs < sz
+        then pure $ U s
+        else report cxt ("Size issue: U " ++ showSize cxt vs ++ " is too large to fit in " ++ showSize cxt sz)
 
   RPi x a b -> do
     a' <- checkTy cxt a size
@@ -436,12 +405,17 @@ checkTy cxt t size = case t of
     pure $ LPi l a'
 
   -- mode switch
-  _ -> do 
-    (tTm, s) <- inferU cxt t
-    let vs = evalSize (env cxt) s
-    if vs <= size then
-      pure (Decode s tTm)
-    else report cxt ("Size issue: got a code at level " ++ show s ++ ", but expected at most " ++ show size)
+  _ -> do
+    (t, a) <- infer cxt t
+    case a of
+      VU i -> case size of 
+        Nothing -> pure (Decode (quoteSize (lvl cxt) i) t)
+        Just sz -> do
+          if i <= sz then
+            pure (Decode (quoteSize (lvl cxt) i) t)
+          else 
+            report cxt ("Size issue: got a code at level " ++ showSize cxt i ++ ", but expected at most " ++ showSize cxt sz)
+      _    -> report cxt "Elaboration error: Expected a code"
 
 check :: Cxt -> Raw -> VTy -> M Tm
 check cxt t a = case (t, a) of
@@ -456,11 +430,11 @@ check cxt t a = case (t, a) of
     pure $ LAbs l t'
 
   (_, VU i) -> do
-    u <- checkTy cxt t i
+    u <- checkTy cxt t (Just i)
     pure $ Code (quoteSize (lvl cxt) i) u
 
   (RLet x a t u, a') -> do
-    a <- checkTy cxt a VOmega
+    a <- checkTy cxt a Nothing
     let ~va = evalTy (env cxt) a
     t <- check cxt t va
     let ~vt = evalTm (env cxt) t
@@ -504,7 +478,7 @@ infer cxt = \case
       _ -> report cxt ("Expected a level-polymorphic type for level application, instead inferred:\n\n  " ++ showVTy cxt tTy)
 
   RLet x a t u -> do
-    a <- checkTy cxt a VOmega
+    a <- checkTy cxt a Nothing
     let ~va = evalTy (env cxt) a
     t <- check cxt t va
     let ~vt = evalTm (env cxt) t
@@ -549,8 +523,6 @@ prettySize ns = \case
       ((ns !! x) ++)
   Sz i -> (show i ++)
   Succ s -> prettySize ns s . (" + 1"++)
-  Big -> ("Tp"++)
-  Omega -> ("Omega"++)
 
 prettyTm :: Int -> [Name] -> Tm -> ShowS
 prettyTm = goTm where
@@ -633,7 +605,7 @@ pArrow   = symbol "→" <|> symbol "->"
 decimal  = lexeme L.decimal
 
 keyword :: String -> Bool
-keyword x = x `elem` ["let", "λ", "U", "Tp", "Omega", "forall"]
+keyword x = x `elem` ["let", "λ", "U", "forall"]
 
 pIdent :: Parser Name
 pIdent = try $ do
@@ -648,9 +620,7 @@ pKeyword kw = do
 
 pRawSizeAtom :: Parser RawSize
 pRawSizeAtom = 
-      (ROmega <$ pKeyword "Omega")
-  <|> (RBig <$ pKeyword "Tp")
-  <|> (RSz <$> decimal)
+      (RSz <$> decimal)
   <|> (RSzVar <$> pIdent)
   <|> parens pRawSize
 
@@ -665,7 +635,6 @@ pAtom =
       withPos (
             (RVar <$> pIdent)
         <|> (RU <$> (pKeyword "U" *> pRawSize))
-        <|> (RU RBig <$ pKeyword "Tp")
       )
   <|> parens pRaw
 

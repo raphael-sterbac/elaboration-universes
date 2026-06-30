@@ -433,6 +433,7 @@ elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm vTermD =
 
       vDatatype = VDecode uLevel vDatatypeCode
 
+      -- TODO : check the VOmega here
       vPTy = VPi "x" vDatatype (\_ -> VU VOmega)
 
       -- TODO : check the "hardcoded" eliminator type more carefuly
@@ -502,6 +503,7 @@ infer cxt = \case
 
   RRecord fields -> do
     ty <- checkTy cxt (RRecord fields) VOmega
+    -- TODO : check the VOmega here
     pure (Code Omega ty, VU VOmega)
 
   RRecordVal [] -> pure (One, VUnit)
