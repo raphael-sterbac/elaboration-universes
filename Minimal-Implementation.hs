@@ -14,38 +14,35 @@ import Text.Printf
 import qualified Text.Megaparsec.Char       as C
 import qualified Text.Megaparsec.Char.Lexer as L
 
-
-
 ex0 = main' "nf" $ unlines [
-
-  "let f : U 1 -> U 1 = \\A. A;",
-  "let g : U 0 -> U 2 = f;",
-  "let f : (A : U 0) -> A -> A = \\A x. x;",
-
-  "let IdTy1    : U 2 = ((A : U 1) -> A -> A);",
-  "let ConstTy0 : U 1 = ((A B : U 0) -> A -> B -> A);",
-  "let id1 : IdTy1 = \\A x. x;",
-  "let const0 : ConstTy0 = \\A B x y. x;",
-  "let foo : ConstTy0 = id1 ConstTy0 const0;",
-
-  "let Nat  : U 1 = ((N : U 0) -> ( N -> N) -> N -> N) ;",
-  "let zero : Nat = λ N s z. z;",
-  "let one  : Nat = λ N s z. s z;",
-  "let five : Nat = \\N s z. s (s (s (s (s z)))) ;",
-  "let add  : Nat -> Nat -> Nat = \\a b N s z. a N s (b N s z) ;",
-  "let mul  : Nat -> Nat -> Nat = \\a b N s z. a N (b N s) z ;",
-  "let ten      : Nat = add five five ;",
-  "let hundred  : Nat = mul ten ten ;",
-
-  "let Eq1 : (A : U 1) → A → A → U 1",
-  "    = λ A x y. ((P : A → U 0) → (P x) → (P y) );",
-
-  "let refl1 : (A : U 1)(x : A) → Eq1 A x x",
-  "  = λ A x P px. px;",
-
-  "let p1 : Eq1 Nat ten ten = refl1 Nat ten;",
-  "id1 Nat hundred"
-
+  "let id : ∀ l. (A : U l) -> A -> A",
+  "  = Λ l. \\A x. x;",
+  "",
+  "let const : ∀ l. ∀ k. (A : U l) -> (B : U k) -> A -> B -> A",
+  "  = Λ l. Λ k. \\A B x y. x;",
+  "",
+  "let Nat : ∀ l. U l + 1 = Λ l. (N : U l) -> (N -> N) -> N -> N ;",
+  "let zero : ∀ l. Nat {l} = Λ l. \\N s z. z;",
+  "let succ : ∀ l. Nat {l} -> Nat {l} = Λ l. \\n N s z. s (n N s z);",
+  "let two : ∀ l. Nat {l} = Λ l. succ {l} (succ {l} (zero {l}));",
+  "let add : ∀ l. Nat {l} -> Nat {l} -> Nat {l} = Λ l. \\n m N s z. n N s (m N s z);",
+  "let four : ∀ l. Nat {l} = Λ l. add {l} (two {l}) (two {l});",
+  "",
+  "let Eq : ∀ l. (A : U l) -> A -> A -> U l + 1",
+  "  = Λ l. \\A x y. (P : A -> U l) -> P x -> P y ;",
+  "let refl : ∀ l. (A : U l) -> (x : A) -> Eq {l} A x x",
+  "  = Λ l. \\A x P px. px ;",
+  "",
+  "let sym : ∀ l. (A : U l) -> (x y : A) -> Eq {l} A x y -> Eq {l} A y x",
+  "  = Λ l. \\A x y p Q. p (\\z. Q z -> Q x) (\\qx. qx) ;",
+  "",
+  "let UEq : ∀ l. Eq {l + 2} (U l + 1) (U l) (U l)",
+  "  = Λ l. refl {l + 2} (U l + 1) (U l) ;",
+  "",
+  "let Lift1 : ∀ l. U l -> U l + 1 = Λ l. \\A. A;",
+  "let doubleLift : ∀ l. (A : U l) -> U l + 2 = Λ l. \\A. Lift1 {l + 1} (Lift1 {l} A);",
+  "",
+  "four {0}"
   ]
 
 
@@ -61,33 +58,29 @@ newtype Lvl = Lvl Int deriving (Eq, Show, Num) via Int
 type Name = String
 
 data RawSize = RSzVar Name | RSz Int | RSucc RawSize deriving Show
-data Size = LVar Ix | Sz Int | Succ Size 
-
-data SizeFlattened = FZero Int | FVar Ix Int deriving (Eq)
-
-flattenSize :: Size -> SizeFlattened
-flattenSize (Sz i) = FZero i
-flattenSize (LVar x) = FVar x 0
-flattenSize (Succ s) = case flattenSize s of
-  FZero n -> FZero (n + 1)
-  FVar x n -> FVar x (n + 1)  
+data Size = LVar Ix | Zero | Succ Size 
 
 instance Eq Size where
-  (==) :: Size -> Size -> Bool
-  s1 == s2 = flattenSize s1 == flattenSize s2
+  Zero == Zero = True
+  LVar x == LVar y = x == y
+  Succ s1 == Succ s2 = s1 == s2
+  _ == _ = False
 
 instance Ord Size where
-  s1 <= s2 = case (flattenSize s1, flattenSize s2) of
-    (FZero n, FZero m) -> n <= m
-    (FZero n, FVar _ m) -> n <= m
-    (FVar _ _, FZero _) -> False
-    (FVar x n, FVar y m) -> x == y && n <= m
-    
-  s1 < s2 = s1 <= s2 && not (s2 <= s1)
+  Zero <= _ = True
+  Succ s1 <= Succ s2 = s1 <= s2
+  LVar x <= LVar y = x == y
+  LVar x <= Succ s2 = LVar x <= s2
+  _ <= _ = False
+  
+  Zero < Succ _ = True
+  Succ s1 < Succ s2 = s1 < s2
+  LVar x < Succ s2 = LVar x <= s2
+  _ < _ = False
 
 instance Show Size where
   show (LVar i) = show i
-  show (Sz i) = show i
+  show Zero = "0"
   show (Succ s) = show s ++ " + 1"
 
 data Raw
@@ -124,32 +117,29 @@ data Tm
 -- values
 ------------------------------------------------------------
 
-data VSize = VLVar Lvl | VSz Int | VSucc VSize
-
-data VSizeFlattened = FVZero Int | FVVar Lvl Int deriving (Eq)
-
-flattenVSize :: VSize -> VSizeFlattened
-flattenVSize (VSz i) = FVZero i
-flattenVSize (VLVar x) = FVVar x 0
-flattenVSize (VSucc s) = case flattenVSize s of
-  FVZero n -> FVZero (n + 1)
-  FVVar x n -> FVVar x (n + 1)
+data VSize = VLVar Lvl | VZero | VSucc VSize
 
 instance Eq VSize where
-  s1 == s2 = flattenVSize s1 == flattenVSize s2
+  VZero == VZero = True
+  VLVar x == VLVar y = x == y
+  VSucc s1 == VSucc s2 = s1 == s2
+  _ == _ = False
 
 instance Ord VSize where
-  s1 <= s2 = case (flattenVSize s1, flattenVSize s2) of
-    (FVZero n, FVZero m) -> n <= m
-    (FVZero n, FVVar _ m) -> n <= m
-    (FVVar _ _, FVZero _) -> False
-    (FVVar x n, FVVar y m) -> x == y && n <= m
-    
-  s1 < s2 = s1 <= s2 && not (s2 <= s1)
+  VZero <= _ = True
+  VSucc s1 <= VSucc s2 = s1 <= s2
+  VLVar x <= VLVar y = x == y
+  VLVar x <= VSucc s2 = VLVar x <= s2
+  _ <= _ = False
+  
+  VZero < VSucc _ = True
+  VSucc s1 < VSucc s2 = s1 < s2
+  VLVar x < VSucc s2 = VLVar x <= s2
+  _ < _ = False
 
 instance Show VSize where
   show (VLVar i) = show i
-  show (VSz i) = show i
+  show VZero = "0"
   show (VSucc s) = show s ++ " + 1"
 
 data VEnvVal = VETm VTm | VESize VSize
@@ -176,7 +166,7 @@ evalSize env = \case
   LVar (Ix x) -> case env !! x of
     VESize s -> s
     _ -> error "Evaluation error: Expected a level variable in environment"
-  Sz i -> VSz i 
+  Zero -> VZero 
   Succ s -> VSucc (evalSize env s)
 
 evalTm :: Env -> Tm -> VTm
@@ -215,7 +205,7 @@ lvl2Ix (Lvl l) (Lvl x) = Ix (l - x - 1)
 quoteSize :: Lvl -> VSize -> Size
 quoteSize l = \case
   VLVar x -> LVar (lvl2Ix l x)
-  VSz i -> Sz i
+  VZero -> Zero
   VSucc s -> Succ (quoteSize l s)
 
 quoteTm :: Lvl -> VTm -> Tm
@@ -295,7 +285,7 @@ bind x ~a (Cxt env types l pos) =
 
 bindLevel :: Name -> Cxt -> Cxt
 bindLevel x (Cxt env types l pos) =
-  Cxt (VESize (VLVar l):env) ((x, VU (VSz 0)):types) (l + 1) pos
+  Cxt (VESize (VLVar l):env) ((x, VU VZero):types) (l + 1) pos
   
 -- Extend Cxt with a definition
 define :: Name -> VTm -> VTy -> Cxt -> Cxt
@@ -375,7 +365,7 @@ elabSize cxt = \case
                           VETm _ -> report cxt ("Expected a level variable, but '" ++ x ++ "' is a term variable.")
           | otherwise = go (i + 1) tys
     go 0 (types cxt)
-  RSz i -> pure (Sz i)
+  RSz i -> pure (iterate Succ Zero !! i)
   RSucc s -> Succ <$> elabSize cxt s
 
 checkTy :: Cxt -> Raw -> Maybe VSize -> M Ty
@@ -521,7 +511,7 @@ prettySize ns = \case
       (("l" ++ show x) ++)
     else 
       ((ns !! x) ++)
-  Sz i -> (show i ++)
+  Zero -> ("0" ++)
   Succ s -> prettySize ns s . (" + 1"++)
 
 prettyTm :: Int -> [Name] -> Tm -> ShowS
