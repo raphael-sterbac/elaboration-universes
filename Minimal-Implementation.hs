@@ -172,17 +172,17 @@ evalSize env = \case
 evalTm :: Env -> Tm -> VTm
 evalTm env = \case
   Var (Ix x) -> case env !! x of
-                     VETm t -> t
-                     _ -> error "Evaluation error: Expected a term variable in environment"
+    VETm t -> t
+    _ -> error "Evaluation error: Expected a term variable in environment"
   App t u -> case (evalTm env t, evalTm env u) of
-                     (VLam _ t, u) -> t u
-                     (t       , u) -> VApp t u
+    (VLam _ t, u) -> t u
+    (t       , u) -> VApp t u
   Lam x t -> VLam x \v -> evalTm (VETm v:env) t
   Let x _ t u -> evalTm (VETm (evalTm env t) : env) u
   LAbs x t -> VLAbs x \i -> evalTm (VESize i : env) t
   LApp t s -> case evalTm env t of
-                     VLAbs _ f -> f (evalSize env s)
-                     f -> VLApp f (evalSize env s)
+    VLAbs _ f -> f (evalSize env s)
+    f -> VLApp f (evalSize env s)
 
   -- Case of a Coding
   Code i a -> VCode (evalSize env i) (evalTy env a)
@@ -361,13 +361,13 @@ elabSize cxt = \case
     let go i [] = report cxt ("Level variable out of scope: " ++ x)
         go i ((x', _):tys)
           | x == x'   = case env cxt !! i of
-                          VESize _ -> pure (LVar (Ix i))
-                          VETm _ -> report cxt ("Expected a level variable, but '" ++ x ++ "' is a term variable.")
+            VESize _ -> pure (LVar (Ix i))
+            VETm _ -> report cxt ("Expected a level variable, but '" ++ x ++ "' is a term variable.")
           | otherwise = go (i + 1) tys
     go 0 (types cxt)
   RSz i -> pure (iterate Succ Zero !! i)
   RSucc s -> Succ <$> elabSize cxt s
-
+  
 checkTy :: Cxt -> Raw -> Maybe VSize -> M Ty
 checkTy cxt t size = case t of
 
@@ -444,8 +444,8 @@ infer cxt = \case
     let go i [] = report cxt ("variable out of scope: " ++ x)
         go i ((x', a):tys)
           | x == x'   = case env cxt !! i of
-                          VETm _ -> pure (Var (Ix i), a)
-                          VESize _ -> report cxt ("Expected a term variable, but '" ++ x ++ "' is a level variable.")
+            VETm _ -> pure (Var (Ix i), a)
+            VESize _ -> report cxt ("Expected a term variable, but '" ++ x ++ "' is a level variable.")
           | otherwise = go (i + 1) tys
     go 0 (types cxt)
 
