@@ -66,6 +66,7 @@ instance Eq Size where
   Succ s1 == Succ s2 = s1 == s2
   _ == _ = False
 
+-- Preorder structure on levels
 instance Ord Size where
   Zero <= _ = True
   Succ s1 <= Succ s2 = s1 <= s2
@@ -99,18 +100,18 @@ data Raw
 -- core syntax
 ------------------------------------------------------------
 
-data Ty
-  = Pi Name ~Ty Ty
+data Tp
+  = Pi Name ~Tp Tp
     | U Size 
     | Decode Size Tm
-    | LPi Name Ty
+    | LPi Name Tp
 
 data Tm
   = Var Ix
   | App Tm ~Tm
-  | Code Size Ty
+  | Code Size Tp
   | Lam Name Tm
-  | Let Name Ty Tm Tm
+  | Let Name Tp Tm Tm
   | LAbs Name Tm
   | LApp Tm Size
 
@@ -125,6 +126,7 @@ instance Eq VSize where
   VSucc s1 == VSucc s2 = s1 == s2
   _ == _ = False
 
+-- Preorder structure on levels
 instance Ord VSize where
   VZero <= _ = True
   VSucc s1 <= VSucc s2 = s1 <= s2
@@ -145,16 +147,16 @@ instance Show VSize where
 data VEnvVal = VETm VTm | VESize VSize
 type Env = [VEnvVal]
 
-data VTy
-  = VPi Name ~VTy (VTm -> VTy)
+data VTp
+  = VPi Name ~VTp (VTm -> VTp)
     | VU VSize 
     | VDecode VSize VTm
-    | VLPi Name (VSize -> VTy)
+    | VLPi Name (VSize -> VTp)
 
 data VTm
   = VVar Lvl
   | VApp VTm ~VTm
-  | VCode VSize VTy
+  | VCode VSize VTp
   | VLam Name (VTm -> VTm)
   | VLAbs Name (VSize -> VTm)
   | VLApp VTm VSize
@@ -184,18 +186,18 @@ evalTm env = \case
     VLAbs _ f -> f (evalSize env s)
     f -> VLApp f (evalSize env s)
 
-  -- Case of a Coding
-  Code i a -> VCode (evalSize env i) (evalTy env a)
+  -- Coding
+  Code i a -> VCode (evalSize env i) (evalTp env a)
 
-evalTy :: Env -> Ty -> VTy
-evalTy env = \case
-  Pi x a b -> VPi x (evalTy env a) \v -> evalTy (VETm v:env) b
+evalTp :: Env -> Tp -> VTp
+evalTp env = \case
+  Pi x a b -> VPi x (evalTp env a) \v -> evalTp (VETm v:env) b
   U i -> VU (evalSize env i)
-  LPi x t -> VLPi x \i -> evalTy (VESize i : env) t
+  LPi x t -> VLPi x \i -> evalTp (VESize i : env) t
 
-  -- Case of a Decoding
+  -- Decoding
   Decode i t -> case evalTm env t of
-    VCode j a | evalSize env i == j -> a  -- Beta Rule for the Universe
+    VCode j a | evalSize env i == j -> a 
     v -> VDecode (evalSize env i) v
 
 
@@ -216,16 +218,16 @@ quoteTm l = \case
   VLAbs x t -> LAbs x (quoteTm (l + 1) (t (VLVar l)))
   VLApp t s -> LApp (quoteTm l t) (quoteSize l s)
 
-  -- Case of a Coding
-  VCode i a -> Code (quoteSize l i) (quoteTy l a)
+  -- Coding
+  VCode i a -> Code (quoteSize l i) (quoteTp l a)
 
-quoteTy :: Lvl -> VTy -> Ty
-quoteTy l = \case
-  VPi  x a b -> Pi x (quoteTy l a) (quoteTy (l + 1) (b (VVar l)))
+quoteTp :: Lvl -> VTp -> Tp
+quoteTp l = \case
+  VPi  x a b -> Pi x (quoteTp l a) (quoteTp (l + 1) (b (VVar l)))
   VU i -> U (quoteSize l i)
-  VLPi x t -> LPi x (quoteTy (l + 1) (t (VLVar l)))
+  VLPi x t -> LPi x (quoteTp (l + 1) (t (VLVar l)))
 
-  -- Case of a Decoding
+  -- Decoding
   VDecode i t -> Decode (quoteSize l i) (quoteTm l t)
 
 nf :: Env -> Tm -> Tm
@@ -247,19 +249,19 @@ convTm l t u = case (t, u) of
   (VLAbs _ t, VLAbs _ t') -> convTm (l + 1) (t (VLVar l)) (t' (VLVar l))
   (VLApp t s, VLApp t' s') -> convTm l t t' && s == s'
 
-  (VCode i a, VCode j b) | i == j -> convTy l a b
+  (VCode i a, VCode j b) | i == j -> convTp l a b
 
   _ -> False
 
-convTy :: Lvl -> VTy -> VTy -> Bool
-convTy l t u = case (t, u) of
+convTp :: Lvl -> VTp -> VTp -> Bool
+convTp l t u = case (t, u) of
   (VU i, VU i') -> i == i'
 
   (VPi _ a b, VPi _ a' b') ->
-       convTy l a a'
-    && convTy (l + 1) (b (VVar l)) (b' (VVar l))
+       convTp l a a'
+    && convTp (l + 1) (b (VVar l)) (b' (VVar l))
     
-  (VLPi _ a, VLPi _ a') -> convTy (l + 1) (a (VLVar l)) (a' (VLVar l))
+  (VLPi _ a, VLPi _ a') -> convTp (l + 1) (a (VLVar l)) (a' (VLVar l))
 
   (VDecode i a, VDecode j b) | i == j -> convTm l a b
 
@@ -270,29 +272,30 @@ convTy l t u = case (t, u) of
 --------------------------------------------------------------------------------
 
 -- type of every variable in scope
-type Types = [(Name, VTy)]
+type Tppes = [(Name, VTp)]
 
 -- Elaboration context
-data Cxt = Cxt {env :: Env, types :: Types, lvl :: Lvl, pos :: SourcePos}
+data Cxt = Cxt {env :: Env, types :: Tppes, lvl :: Lvl, pos :: SourcePos}
 
 emptyCxt :: SourcePos -> Cxt
 emptyCxt = Cxt [] [] 0
 
--- Extend Cxt with a bound variable
-bind :: Name -> VTy -> Cxt -> Cxt
+-- Extend Cxt with a bound term variable
+bind :: Name -> VTp -> Cxt -> Cxt
 bind x ~a (Cxt env types l pos) =
   Cxt (VETm (VVar l):env) ((x, a):types) (l + 1) pos
 
+-- Extend Cxt with a bound level variable
 bindLevel :: Name -> Cxt -> Cxt
 bindLevel x (Cxt env types l pos) =
   Cxt (VESize (VLVar l):env) ((x, VU VZero):types) (l + 1) pos
   
 -- Extend Cxt with a definition
-define :: Name -> VTm -> VTy -> Cxt -> Cxt
+define :: Name -> VTm -> VTp -> Cxt -> Cxt
 define x ~t ~a (Cxt env types l pos) =
   Cxt (VETm t:env) ((x, a):types) (l + 1) pos
 
--- Typechecking monad, We annotate the error with the current source position
+-- Tppechecking monad
 type M = Either (String, SourcePos)
 
 
@@ -301,27 +304,25 @@ report :: Cxt -> String -> M a
 report cxt msg = Left (msg, pos cxt)
 
 deriving instance Show Tm
-deriving instance Show Ty
+deriving instance Show Tp
 
 showTm :: Cxt -> Tm -> String
 showTm cxt t = prettyTm 0 (map fst (types cxt)) t []
 
-showTy :: Cxt -> Ty -> String
-showTy cxt a = prettyTy 0 (map fst (types cxt)) a []
-
--- showTm cxt t = show t
+showTp :: Cxt -> Tp -> String
+showTp cxt a = prettyTp 0 (map fst (types cxt)) a []
 
 showTm0 :: Tm -> String
 showTm0 t = prettyTm 0 [] t []
 
-showTy0 :: Ty -> String
-showTy0 a = prettyTy 0 [] a []
+showTp0 :: Tp -> String
+showTp0 a = prettyTp 0 [] a []
 
 showVal :: Cxt -> VTm -> String
 showVal cxt v = showTm cxt $ quoteTm (lvl cxt) v
 
-showVTy :: Cxt -> VTy -> String
-showVTy cxt v = showTy cxt $ quoteTy (lvl cxt) v
+showVTp :: Cxt -> VTp -> String
+showVTp cxt v = showTp cxt $ quoteTp (lvl cxt) v
 
 showSize :: Cxt -> VSize -> String
 showSize cxt s = prettySize (map fst (types cxt)) (quoteSize (lvl cxt) s) ""
@@ -332,8 +333,8 @@ vApp :: VTm -> VTm -> VTm
 vApp (VLam _ f) v = f v
 vApp f          v = VApp f v
 
-coe :: Cxt -> Lvl -> VTy -> VTy -> Tm -> M Tm
-coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
+coe :: Cxt -> Lvl -> VTp -> VTp -> Tm -> M Tm
+coe cxt l sourceTp targetTp m = case (sourceTp, targetTp) of
   (VU i, VU j) | i <= j -> 
     pure $ Code (quoteSize (lvl cxt) j) (Decode (quoteSize (lvl cxt) i) m)
 
@@ -352,7 +353,7 @@ coe cxt l sourceTy targetTy m = case (sourceTy, targetTy) of
     pure $ Lam n2 n_x
 
   _ -> 
-    if convTy l sourceTy targetTy then pure m 
+    if convTp l sourceTp targetTp then pure m 
     else report cxt "Error: Invalid coercion"
 
 elabSize :: Cxt -> RawSize -> M Size
@@ -368,10 +369,10 @@ elabSize cxt = \case
   RSz i -> pure (iterate Succ Zero !! i)
   RSucc s -> Succ <$> elabSize cxt s
   
-checkTy :: Cxt -> Raw -> Maybe VSize -> M Ty
-checkTy cxt t size = case t of
+checkTp :: Cxt -> Raw -> Maybe VSize -> M Tp
+checkTp cxt t size = case t of
 
-  RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
+  RSrcPos pos t -> checkTp (cxt {pos = pos}) t size
 
   RU s -> do
     s <- elabSize cxt s
@@ -384,14 +385,14 @@ checkTy cxt t size = case t of
         else report cxt ("Size issue: U " ++ showSize cxt vs ++ " is too large to fit in " ++ showSize cxt sz)
 
   RPi x a b -> do
-    a' <- checkTy cxt a size
-    let cxt' = bind x (evalTy (env cxt) a') cxt
-    b' <- checkTy cxt' b size
+    a' <- checkTp cxt a size
+    let cxt' = bind x (evalTp (env cxt) a') cxt
+    b' <- checkTp cxt' b size
     pure $ Pi x a' b'
     
   RLPi l a -> do
     let cxt' = bindLevel l cxt
-    a' <- checkTy cxt' a size
+    a' <- checkTp cxt' a size
     pure $ LPi l a'
 
   -- mode switch
@@ -407,7 +408,7 @@ checkTy cxt t size = case t of
             report cxt ("Size issue: got a code at level " ++ showSize cxt i ++ ", but expected at most " ++ showSize cxt sz)
       _    -> report cxt "Elaboration error: Expected a code"
 
-check :: Cxt -> Raw -> VTy -> M Tm
+check :: Cxt -> Raw -> VTp -> M Tm
 check cxt t a = case (t, a) of
   (RSrcPos pos t, a) -> check (cxt {pos = pos}) t a
 
@@ -420,12 +421,12 @@ check cxt t a = case (t, a) of
     pure $ LAbs l t'
 
   (_, VU i) -> do
-    u <- checkTy cxt t (Just i)
+    u <- checkTp cxt t (Just i)
     pure $ Code (quoteSize (lvl cxt) i) u
 
   (RLet x a t u, a') -> do
-    a <- checkTy cxt a Nothing
-    let ~va = evalTy (env cxt) a
+    a <- checkTp cxt a Nothing
+    let ~va = evalTp (env cxt) a
     t <- check cxt t va
     let ~vt = evalTm (env cxt) t
     u <- check (define x vt va cxt) u a' 
@@ -433,10 +434,10 @@ check cxt t a = case (t, a) of
 
   -- mode switch
   _ -> do
-    (m, bTy) <- infer cxt t
-    coe cxt (lvl cxt) bTy a m
+    (m, bTp) <- infer cxt t
+    coe cxt (lvl cxt) bTp a m
     
-infer :: Cxt -> Raw -> M (Tm, VTy)
+infer :: Cxt -> Raw -> M (Tm, VTp)
 infer cxt = \case
   RSrcPos pos t -> infer (cxt {pos = pos}) t
 
@@ -456,20 +457,20 @@ infer cxt = \case
         u' <- check cxt u a
         pure (App t' u', b (evalTm (env cxt) u'))
       tty ->
-        report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTy cxt tty
+        report cxt $ "Expected a function type, instead inferred:\n\n  " ++ showVTp cxt tty
 
   RLApp t s -> do
-    (tTm, tTy) <- infer cxt t
-    case tTy of
+    (tTm, tTp) <- infer cxt t
+    case tTp of
       VLPi _ b -> do
         sz <- elabSize cxt s
         let vsz = evalSize (env cxt) sz
         pure (LApp tTm sz, b vsz)
-      _ -> report cxt ("Expected a level-polymorphic type for level application, instead inferred:\n\n  " ++ showVTy cxt tTy)
+      _ -> report cxt ("Expected a level-polymorphic type for level application, instead inferred:\n\n  " ++ showVTp cxt tTp)
 
   RLet x a t u -> do
-    a <- checkTy cxt a Nothing
-    let ~va = evalTy (env cxt) a
+    a <- checkTp cxt a Nothing
+    let ~va = evalTp (env cxt) a
     t <- check cxt t va
     let ~vt = evalTm (env cxt) t
     (u, uty) <- infer (define x vt va cxt) u  
@@ -493,14 +494,11 @@ fresh ns x | elem x ns = go (1 :: Int) where
        | otherwise             = x ++ show n
 fresh ns x = x
 
--- printing precedences
-atomp = 3  :: Int -- U, var
-appp  = 2  :: Int -- application
-pip   = 1  :: Int -- pi
-letp  = 0  :: Int -- let, lambda
+atomp = 3  :: Int 
+appp  = 2  :: Int 
+pip   = 1  :: Int 
+letp  = 0  :: Int 
 
--- | Wrap in parens if expression precedence is lower than
---   enclosing expression precedence.
 par :: Int -> Int -> ShowS -> ShowS
 par p p' = showParen (p' < p)
 
@@ -542,38 +540,36 @@ prettyTm = goTm where
 
     LApp t s                  -> par p appp $ goTm appp ns t . (" {"++) . prettySize ns s . ("}"++)
 
-    Code i t -> ('[':).prettyTy letp ns t.(']':)
+    Code i t -> ('[':).prettyTp letp ns t.(']':)
 
     Let (fresh ns -> x) a t u ->
-      par p letp $ ("let "++) . (x++) . (" : "++) . prettyTy letp ns a
+      par p letp $ ("let "++) . (x++) . (" : "++) . prettyTp letp ns a
       . ("\n    = "++) . goTm letp ns t . ("\n;\n"++) . goTm letp (x:ns) u
 
-prettyTy :: Int -> [Name] -> Ty -> ShowS
-prettyTy = goTy where
+prettyTp :: Int -> [Name] -> Tp -> ShowS
+prettyTp = goTp where
   piBind ns x a =
-    showParen True ((x++) . (" : "++) . goTy letp ns a)
+    showParen True ((x++) . (" : "++) . goTp letp ns a)
 
-  goTy :: Int -> [Name] -> Ty -> ShowS
-  goTy p ns = \case    
+  goTp :: Int -> [Name] -> Tp -> ShowS
+  goTp p ns = \case    
     U i                       -> par p appp $ ("U "++).prettySize ns i
 
-    Pi "_" a b                -> par p pip $ goTy appp ns a . (" → "++) . goTy pip ("_":ns) b
+    Pi "_" a b                -> par p pip $ goTp appp ns a . (" → "++) . goTp pip ("_":ns) b
 
     Pi (fresh ns -> x) a b    -> par p pip $ piBind ns x a . goPi (x:ns) b where
-                                   goPi ns (Pi "_" a b) = (" → "++) . goTy appp ns a
-                                                          . (" → "++) . goTy pip ("_":ns) b
+                                   goPi ns (Pi "_" a b) = (" → "++) . goTp appp ns a
+                                                          . (" → "++) . goTp pip ("_":ns) b
                                    goPi ns (Pi x a b)   = piBind ns x a . goPi (x:ns) b
-                                   goPi ns b            = (" → "++) . goTy pip ns b
+                                   goPi ns b            = (" → "++) . goTp pip ns b
 
     LPi (fresh ns -> x) t     -> par p pip $ ("∀ "++) . (x++) . goLPi (x:ns) t where
                                    goLPi ns (LPi (fresh ns -> x) t') =
                                      (' ':) . (x++) . goLPi (x:ns) t'
                                    goLPi ns t' =
-                                     (". "++) . goTy pip ns t'
+                                     (". "++) . goTp pip ns t'
 
     Decode i t   -> ('<':).prettyTm letp ns t.('>':)
-
--- instance Show Tm where showsPrec p = prettyTm p []
 
 
 -- parsing
@@ -735,7 +731,7 @@ mainWith getOpt getRaw = do
         Right (t, a) -> do
           putStrLn $ showTm0 $ nf [] t
           putStrLn "  :"
-          putStrLn $ showTy0 $ quoteTy 0 a
+          putStrLn $ showTp0 $ quoteTp 0 a
     ["elab"] -> do
       (t, file) <- getRaw
       case infer (emptyCxt (initialPos file)) t of
@@ -745,12 +741,11 @@ mainWith getOpt getRaw = do
       (t, file) <- getRaw
       case infer (emptyCxt (initialPos file)) t of
         Left err     -> displayError file err
-        Right (t, a) -> putStrLn $ showTy0 $ quoteTy 0 a
+        Right (t, a) -> putStrLn $ showTp0 $ quoteTp 0 a
     _ -> putStrLn helpMsg
 
 main :: IO ()
 main = ex0
 
--- | Run main with inputs as function arguments.
 main' :: String -> String -> IO ()
 main' mode src = mainWith (pure [mode]) ((,src) <$> parseString src)
