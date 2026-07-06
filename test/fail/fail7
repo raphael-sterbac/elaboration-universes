@@ -1,6 +1,6 @@
 -- should fail (strict positivity)
 
-data Bad : Tp where {
+data Bad : Big where {
     bad : (Bad → Bad) → Bad
 } ;
 

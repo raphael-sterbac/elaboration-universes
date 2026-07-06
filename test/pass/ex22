@@ -1,4 +1,4 @@
-data Nat : Tp where {
+data Nat : Big where {
   zero : Nat ;
   succ : Nat -> Nat
 } ;

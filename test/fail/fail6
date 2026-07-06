@@ -1,9 +1,9 @@
-data List (A : Tp) : Tp where {
+data List (A : Big) : Big where {
   nil : List A ;
   cons : A -> List A -> List A
 } ;
 
 -- should fail
-let ParadoxList : Tp = List Tp ;
+let ParadoxList : Big = List Big ;
 
 ParadoxList

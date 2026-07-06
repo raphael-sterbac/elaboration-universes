@@ -187,7 +187,7 @@ elabSize cxt = \case
                           VETm _ -> report cxt ("Expected a level variable, but '" ++ x ++ "' is a term variable.")
           | otherwise = go (i + 1) tys
     go 0 (types cxt)
-  RSz i -> pure (Sz i)
+  RSz i -> pure (iterate Succ Zero !! i)
   RSucc s -> Succ <$> elabSize cxt s
   RBig -> pure Big
   ROmega -> pure Omega
@@ -196,24 +196,19 @@ checkTy :: Cxt -> Raw -> VSize -> M Ty
 checkTy cxt t size = case t of
   RSrcPos pos t -> checkTy (cxt {pos = pos}) t size
 
-  RU s -> do
+  RU s -> do 
     s' <- elabSize cxt s
     let vs' = evalSize (env cxt) s'
-    if vs' < size then 
+    
+    if vs' < size || (vs' == VOmega && size == VOmega) then 
       pure $ U s'
     else report cxt ("Size issue: U " ++ showSize cxt vs' ++ " is too large to fit in U " ++ showSize cxt size)
 
   RRecord [] -> pure Unit
   RRecord ((x, a):xs) -> do
-    -- TODO : Make sure that records indeed live in the right universe
-    -- Maybe just the user notation is broken : `let Category : Tp = {}`
-    let nextSize = case size of
-          VSz i -> VSz (i + 1)
-          _  -> VOmega
-
-    aTy <- checkTy cxt a nextSize
+    aTy <- checkTy cxt a size
     let cxt' = bind x (evalTy (env cxt) aTy) cxt
-    bTy <- checkTy cxt' (RRecord xs) nextSize
+    bTy <- checkTy cxt' (RRecord xs) size
     pure $ Sigma x aTy bTy
 
   RPi x a b -> do
@@ -333,17 +328,17 @@ isRec d (RApp f _) = isRec d f
 isRec d _ = False
 
 -- TODO: double check this, should probably be integrated by default
-checkInfRec :: Name -> Cxt -> Raw -> M (Maybe Desc)
-checkInfRec dName c = \case
-  RSrcPos pos t -> checkInfRec dName (c {pos = pos}) t
+checkInfRec :: VSize -> Name -> Cxt -> Raw -> M (Maybe Desc)
+checkInfRec uLevel dName c = \case
+  RSrcPos pos t -> checkInfRec uLevel dName (c {pos = pos}) t
   RPi z dom cod -> do
     if isRec dName cod then do
-      domTy <- checkTy c dom VOmega
+      domTy <- checkTy c dom uLevel
       pure $ Just (DescProd z domTy DescVar)
     else do
-      domTy <- checkTy c dom VOmega
+      domTy <- checkTy c dom uLevel
       let vDom = evalTy (env c) domTy
-      res <- checkInfRec dName (bind z vDom c) cod
+      res <- checkInfRec uLevel dName (bind z vDom c) cod
       case res of
         Just dCod -> pure $ Just (DescProd z domTy dCod)
         Nothing -> pure Nothing
@@ -351,23 +346,23 @@ checkInfRec dName c = \case
 
 -- TODO : rethink this function, probably we can simplify it
 -- Elaborates the description associated to a raw term : second premise of rule (b)
-elabConstrDesc :: Name -> Cxt -> Raw -> M Desc
-elabConstrDesc dName c = \case
-  RSrcPos pos t -> elabConstrDesc dName (c {pos = pos}) t
+elabConstrDesc :: VSize -> Name -> Cxt -> Raw -> M Desc
+elabConstrDesc uLevel dName c = \case
+  RSrcPos pos t -> elabConstrDesc uLevel dName (c {pos = pos}) t
   RPi y a b -> do
     if isRec dName a then do
-      rest <- elabConstrDesc dName c b
+      rest <- elabConstrDesc uLevel dName c b
       pure $ DescTensor DescVar rest
     else do
-      infRecDesc <- checkInfRec dName c a
+      infRecDesc <- checkInfRec uLevel dName c a
       case infRecDesc of
         Just d_a -> do
-          rest <- elabConstrDesc dName c b
+          rest <- elabConstrDesc uLevel dName c b
           pure $ DescTensor d_a rest
         Nothing -> do
-          aTy <- checkTy c a VOmega
+          aTy <- checkTy c a uLevel
           let va = evalTy (env c) aTy
-          rest <- elabConstrDesc dName (bind y va c) b
+          rest <- elabConstrDesc uLevel dName (bind y va c) b
           pure $ DescSum y aTy rest
   _ -> pure DescUnit
 
@@ -433,10 +428,9 @@ elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm vTermD =
 
       vDatatype = VDecode uLevel vDatatypeCode
 
-      -- TODO : check the VOmega here
-      vPTy = VPi "x" vDatatype (\_ -> VU VOmega)
+      -- The motive P now targets the exact universe of the datatype
+      vPTy = VPi "x" vDatatype (\_ -> VU uLevel)
 
-      -- TODO : check the "hardcoded" eliminator type more carefuly
       vElimTyBody =
         VPi "P" vPTy $ \vP ->
 
@@ -445,15 +439,15 @@ elabElimTy uLevel dName params pTyTms (Lvl l_p) vTuple vTagTm vTermD =
                     vFuncTy = VExt vDesc_c vDatatype
                 in VPi "p" vFuncTy $ \vFunc ->
 
-                     let vIhTy = VSquare vDesc_c (VDecode VOmega . vApp vP) vFunc
-                         vTargetExp = VDecode VOmega (vApp vP (VIn (VDPair "c" vc vFunc)))
+                     let vIhTy = VSquare vDesc_c (VDecode uLevel . vApp vP) vFunc
+                         vTargetExp = VDecode uLevel (vApp vP (VIn (VDPair "c" vc vFunc)))
                      in VPi "ih" vIhTy $ const vTargetExp
 
-              vMTy = VSmallPiE vTagTm (VLam "c" (VCode VOmega . mBody))
+              vMTy = VSmallPiE vTagTm (VLam "c" (VCode uLevel . mBody))
 
           in VPi "m" vMTy $ \vM ->
                VPi "x" vDatatype $ \vX ->
-                 VDecode VOmega (vApp vP vX)
+                 VDecode uLevel (vApp vP vX)
 
       elimTyBodyTm = quoteTy (Lvl l_p) vElimTyBody
 
@@ -503,7 +497,6 @@ infer cxt = \case
 
   RRecord fields -> do
     ty <- checkTy cxt (RRecord fields) VOmega
-    -- TODO : check the VOmega here
     pure (Code Omega ty, VU VOmega)
 
   RRecordVal [] -> pure (One, VUnit)
@@ -564,9 +557,11 @@ infer cxt = \case
     let vTagTy = evalTy (env cxt_params) tagTy
     let cxt_with_c = bind "c" vTagTy cxt_params
 
+    let vuLevel = evalSize (env cxt_params) uLevel
+
     -- Elaborate the list of descriptions corresponding to the type of each constructor
     desc_list <- forM constrsList $ \(_, cTyRaw) ->
-                     elabConstrDesc x cxt_with_c cTyRaw
+                     elabConstrDesc vuLevel x cxt_with_c cTyRaw
 
     -- Bundles the previous list in a single description corresponding to the datatype
     let n = length params
@@ -587,6 +582,7 @@ infer cxt = \case
     let vTermD = evalTm (env cxt) term_D
     let cxt_initial_constrs = define x vTermD vTyParams cxt
 
+    -- elabConstrs remains unchanged and does not take vuLevel
     (cxt_with_constrs, wrapLets, constrsData) <- elabConstrs x params cxt_initial_constrs (zip constrsList tags)
 
     -- Eliminators 

@@ -28,9 +28,9 @@ prettySize ns = \case
       (("l" ++ show x) ++)
     else 
       ((ns !! x) ++)
-  Sz i -> (show i ++)
+  Zero -> ("0" ++)
   Succ s -> prettySize ns s . (" + 1"++)
-  Big -> ("Tp"++)
+  Big -> ("Big"++)
   Omega -> ("Omega"++)
 
 prettyTm :: Int -> [Name] -> Tm -> ShowS

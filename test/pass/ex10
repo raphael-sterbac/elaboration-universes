@@ -1,20 +1,20 @@
-data Nat : Tp where {
+data Nat : Big where {
   zero : Nat ;
   succ : Nat -> Nat
 } ;
 
-data List (A : Tp) : Tp where {
+data List (A : Big) : Big where {
   nil : List A ;
   cons : A -> List A -> List A
 } ;
 
-let Monad : Tp = {
-  M : Tp -> Tp,
-  ret : (A : Tp) -> A -> M A,
-  bind : (A : Tp) -> (B : Tp) -> M A -> (A -> M B) -> M B
+let Monad : Type = {
+  M : Big -> Big,
+  ret : (A : Big) -> A -> M A,
+  bind : (A : Big) -> (B : Big) -> M A -> (A -> M B) -> M B
 } ;
 
-let append : (B : Tp) -> List B -> List B -> List B = \B l1 l2.
+let append : (B : Big) -> List B -> List B -> List B = \B l1 l2.
   elimList B (\_. List B)
     < \p ihs. l2 ,
     < \p ihs. cons B (fst p) fst ihs ,
@@ -32,7 +32,7 @@ let ListMonad : Monad = {
       l
 } ;
 
-let mapM : (m : Monad) -> (A : Tp) -> (B : Tp) -> (A -> B) -> m.M A -> m.M B = \m A B f ma.
+let mapM : (m : Monad) -> (A : Big) -> (B : Big) -> (A -> B) -> m.M A -> m.M B = \m A B f ma.
   m.bind A B ma (\a. m.ret B (f a)) ;
 
 let Database : U 1 = {

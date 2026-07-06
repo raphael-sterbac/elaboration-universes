@@ -1,10 +1,10 @@
-data List (A : Tp) : Tp where {
+data List (A : Big) : Big where {
   nil : List A ;
   cons : A -> List A -> List A
 } ;
 
 let SmallList : List (U 0) = nil (U 0) ;
 
-let UpcastParam : List Tp = SmallList ;
+let UpcastParam : List Big = SmallList ;
 
 UpcastParam

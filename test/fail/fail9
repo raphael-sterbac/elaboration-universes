@@ -1,5 +1,5 @@
 let ParadoxRec : U 0 = {
-  massiveField : Tp
+  massiveField : Big
 } ;
 
 ParadoxRec

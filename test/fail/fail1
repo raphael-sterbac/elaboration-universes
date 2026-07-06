@@ -3,9 +3,9 @@ data Nat : U 0 where {
   succ : Nat -> Nat
 } ;
 
-data BadList : Tp where {
+data BadList : Big where {
   nil : BadList ;
-  cons : Tp -> BadList -> BadList
+  cons : Big -> BadList -> BadList
 } ;
 
 -- should fail

@@ -12,43 +12,41 @@ newtype Ix  = Ix  Int deriving (Eq, Show, Num) via Int
 newtype Lvl = Lvl Int deriving (Eq, Show, Num) via Int
 
 data RawSize = RSzVar Name | RSz Int | RSucc RawSize | RBig | ROmega deriving Show
-data Size = LVar Ix | Sz Int | Succ Size | Big | Omega 
-
-data SizeFlattened = FZero Int | FVar Ix Int | FBig | FOmega deriving (Eq)
-
-flattenSize :: Size -> SizeFlattened
-flattenSize (Sz i) = FZero i
-flattenSize (LVar x) = FVar x 0
-flattenSize Big = FBig
-flattenSize Omega = FOmega
-flattenSize (Succ s) = case flattenSize s of
-  FZero n -> FZero (n + 1)
-  FVar x n -> FVar x (n + 1)
-  FBig -> FBig     
-  FOmega -> FOmega  
+data Size = LVar Ix | Zero | Succ Size | Big | Omega 
 
 instance Eq Size where
-  (==) :: Size -> Size -> Bool
-  s1 == s2 = flattenSize s1 == flattenSize s2
+  Zero == Zero = True
+  Big == Big = True
+  Omega == Omega = True
+  LVar x == LVar y = x == y
+  Succ s1 == Succ s2 = s1 == s2
+  _ == _ = False
 
 instance Ord Size where
-  s1 <= s2 = case (flattenSize s1, flattenSize s2) of
-    (_, FOmega) -> True
-    (FOmega, _) -> False
-    (_, FBig) -> True
-    (FBig, _) -> False
-    (FZero n, FZero m) -> n <= m
-    (FZero n, FVar _ m) -> n <= m
-    (FVar _ _, FZero _) -> False
-    (FVar x n, FVar y m) -> x == y && n <= m
-    
-  s1 < s2 = s1 <= s2 && not (s2 <= s1)
+  _ <= Omega = True
+  Omega <= _ = False
+  _ <= Big = True
+  Big <= _ = False
+  Zero <= _ = True
+  Succ s1 <= Succ s2 = s1 <= s2
+  LVar x <= LVar y = x == y
+  LVar x <= Succ s2 = LVar x <= s2
+  _ <= _ = False
+  
+  Omega < _ = False
+  _ < Omega = True
+  Big < _ = False
+  _ < Big = True
+  Zero < Succ _ = True
+  Succ s1 < Succ s2 = s1 < s2
+  LVar x < Succ s2 = LVar x <= s2
+  _ < _ = False
 
 instance Show Size where
   show (LVar i) = show i
-  show (Sz i) = show i
+  show Zero = "0"
   show (Succ s) = show s ++ " + 1"
-  show Big    = "Tp"
+  show Big    = "Big"
   show Omega  = "Omega"
 
 type Name = String

@@ -126,7 +126,7 @@ instance Eq VSize where
   VSucc s1 == VSucc s2 = s1 == s2
   _ == _ = False
 
--- Preorder structure on levels
+-- Preorder structure on semantic levels
 instance Ord VSize where
   VZero <= _ = True
   VSucc s1 <= VSucc s2 = s1 <= s2

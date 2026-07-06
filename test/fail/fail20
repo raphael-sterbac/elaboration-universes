@@ -1,0 +1,10 @@
+let ImpredicativeRecord : U 0 = 
+  { Ty : U 0 } ;
+
+let selfContain : ImpredicativeRecord = 
+  { Ty = ImpredicativeRecord } ;
+
+let extract : U 0 = 
+  (selfContainment).Ty ;
+
+extract

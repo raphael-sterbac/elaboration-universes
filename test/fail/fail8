@@ -10,7 +10,7 @@ data Bool : U 0 where {
 
 
 -- Should fail (strict positivity)
-data Strange : Tp where {
+data Strange : Big where {
   strange : ((Bool → Strange) → (Nat → Strange)) → Strange
 } ;
 

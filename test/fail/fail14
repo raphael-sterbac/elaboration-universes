@@ -1,5 +1,5 @@
-data Wrapper : Tp where {
-  wrap : (A : Tp) -> A -> Wrapper
+data Wrapper : Big where {
+  wrap : (A : Big) -> A -> Wrapper
 } ;
 
 let SmallWrapperType : U 1 = Wrapper @ 0 ;
@@ -7,7 +7,7 @@ let SmallWrapperType : U 1 = Wrapper @ 0 ;
 let myWrap : SmallWrapperType = wrap (U 0) Nat @ 0 ;
 
 let escape : U 0 = 
-  elimWrapper (\_. Tp)
+  elimWrapper (\_. Big)
     < \p ihs. fst (snd p) > 
     myWrap ;
 

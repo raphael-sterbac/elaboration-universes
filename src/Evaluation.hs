@@ -11,42 +11,41 @@ data VEnvVal = VETm VTm | VESize VSize
 type Env = [VEnvVal]
 data VLabel = VData Name [VTm]
 
-data VSize = VLVar Lvl | VSz Int | VSucc VSize | VBig | VOmega 
-
-data VSizeFlattened = FVZero Int | FVVar Lvl Int | FVBig | FVOmega deriving (Eq)
-
-flattenVSize :: VSize -> VSizeFlattened
-flattenVSize (VSz i) = FVZero i
-flattenVSize (VLVar x) = FVVar x 0
-flattenVSize VBig = FVBig
-flattenVSize VOmega = FVOmega
-flattenVSize (VSucc s) = case flattenVSize s of
-  FVZero n -> FVZero (n + 1)
-  FVVar x n -> FVVar x (n + 1)
-  FVBig -> FVBig
-  FVOmega -> FVOmega
+data VSize = VLVar Lvl | VZero | VSucc VSize | VBig | VOmega 
 
 instance Eq VSize where
-  s1 == s2 = flattenVSize s1 == flattenVSize s2
+  VZero == VZero = True
+  VBig == VBig = True
+  VOmega == VOmega = True
+  VLVar x == VLVar y = x == y
+  VSucc s1 == VSucc s2 = s1 == s2
+  _ == _ = False
 
 instance Ord VSize where
-  s1 <= s2 = case (flattenVSize s1, flattenVSize s2) of
-    (_, FVOmega) -> True
-    (FVOmega, _) -> False
-    (_, FVBig) -> True
-    (FVBig, _) -> False
-    (FVZero n, FVZero m) -> n <= m
-    (FVZero n, FVVar _ m) -> n <= m
-    (FVVar _ _, FVZero _) -> False
-    (FVVar x n, FVVar y m) -> x == y && n <= m
-    
-  s1 < s2 = s1 <= s2 && not (s2 <= s1)
+  _ <= VOmega = True
+  VOmega <= _ = False
+  _ <= VBig = True
+  VBig <= _ = False
+  VZero <= _ = True
+  VSucc s1 <= VSucc s2 = s1 <= s2
+  VLVar x <= VLVar y = x == y
+  VLVar x <= VSucc s2 = VLVar x <= s2
+  _ <= _ = False
+  
+  VOmega < _ = False
+  _ < VOmega = True
+  VBig < _ = False
+  _ < VBig = True
+  VZero < VSucc _ = True
+  VSucc s1 < VSucc s2 = s1 < s2
+  VLVar x < VSucc s2 = VLVar x <= s2
+  _ < _ = False
 
 instance Show VSize where
   show (VLVar i) = show i
-  show (VSz i) = show i
+  show VZero = "0"
   show (VSucc s) = show s ++ " + 1"
-  show VBig    = "Tp"
+  show VBig    = "Big"
   show VOmega  = "Omega"
 
 data VTy
@@ -165,7 +164,7 @@ evalSize env = \case
   LVar (Ix x) -> case env !! x of
     VESize s -> s
     _ -> error "Evaluation error: Expected a level variable in environment"
-  Sz i -> VSz i 
+  Zero -> VZero 
   Succ s -> VSucc (evalSize env s)
   Big -> VBig
   Omega -> VOmega
@@ -293,11 +292,10 @@ lvl2Ix (Lvl l) (Lvl x) = Ix (l - x - 1)
 quoteSize :: Lvl -> VSize -> Size
 quoteSize l = \case
   VLVar x -> LVar (lvl2Ix l x)
-  VSz i -> Sz i
+  VZero -> Zero
   VSucc s -> Succ (quoteSize l s)
   VBig -> Big
   VOmega -> Omega
-
 quoteTm :: Lvl -> VTm -> Tm
 quoteTm l = \case
   VVar x -> Var (lvl2Ix l x)

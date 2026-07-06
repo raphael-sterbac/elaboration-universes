@@ -1,0 +1,5 @@
+data Bad : U 0 where {
+  mkBad : U 2 -> Bad
+} ;
+
+Bad

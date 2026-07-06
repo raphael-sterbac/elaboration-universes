@@ -3,12 +3,12 @@ data Nat : U 0 where {
   succ : Nat -> Nat
 } ;
 
-data List (A : Tp) : Tp where {
+data List (A : Big) : Big where {
   nil : List A ;
   cons : A -> List A -> List A
 } ;
 
-let UniverseList : Tp = List (U 1) ;
+let UniverseList : Big = List (U 1) ;
 
 let myTypes : List (U 2) = cons (U 2) (U 0) (cons (U 2) (Nat -> Nat) (cons (U 2) (UniverseList) (nil (U 2)))) ;
 

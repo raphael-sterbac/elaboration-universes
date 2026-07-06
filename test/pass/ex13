@@ -1,16 +1,16 @@
-let Category : Tp = {
-  Obj : Tp,
-  Hom : Obj -> Obj -> Tp,
+let Category : Type = {
+  Obj : Big,
+  Hom : Obj -> Obj -> Big,
   id : (x : Obj) -> Hom x x,
   comp : (x : Obj) -> (y : Obj) -> (z : Obj) -> Hom y z -> Hom x y -> Hom x z
 } ;
 
-let Functor : (C : Category) -> (D : Category) -> Tp = \C D. {
+let Functor : (C : Category) -> (D : Category) -> Type = \C D. {
   FObj : C.Obj -> D.Obj,
   FHom : (x : C.Obj) -> (y : C.Obj) -> C.Hom x y -> D.Hom (FObj x) (FObj y)
 } ;
 
-let NatTrans : (C : Category) -> (D : Category) -> (F : Functor C D) -> (G : Functor C D) -> Tp = \C D F G. {
+let NatTrans : (C : Category) -> (D : Category) -> (F : Functor C D) -> (G : Functor C D) -> Type = \C D F G. {
   cmp : (x : C.Obj) -> D.Hom (F.FObj x) (G.FObj x)
 } ;
 

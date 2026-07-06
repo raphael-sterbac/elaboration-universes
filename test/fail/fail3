@@ -3,7 +3,7 @@ data Nat : U 0 where {
   succ : Nat -> Nat
 } ;
 
-data BadTree (A : Tp) : Tp where {
+data BadTree (A : Big) : Big where {
   leaf : BadTree A ;
   node : (U 0 -> BadTree A) -> BadTree A
 } ;

@@ -3,13 +3,13 @@ data Nat : U 0 where {
   succ : Nat -> Nat
 } ;
 
-data List (A : Tp) : Tp where {
+data List (A : Big) : Big where {
   nil : List A ;
   cons : A -> List A -> List A
 } ;
 
 -- should fail (nested inductive)
-data RoseTree (A : Tp) : Tp where {
+data RoseTree (A : Big) : Big where {
   node : A -> List (RoseTree A) -> RoseTree A
 } ;
 
