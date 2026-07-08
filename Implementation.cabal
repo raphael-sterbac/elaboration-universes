@@ -2,10 +2,7 @@ cabal-version: 1.12
 
 name:           implem-fuss-free
 version:        0.1.0.0
-description:    Implementation of MLTT with a cumulative hierarchy of universes 
 category:       Language
-author:         Raphaël Sterbac
-maintainer:     raphael.sterbac@ens-paris-saclay.Fr
 build-type:     Simple
 
 executable implem-fuss-free

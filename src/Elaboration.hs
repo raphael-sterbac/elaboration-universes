@@ -200,7 +200,7 @@ checkTy cxt t size = case t of
     s' <- elabSize cxt s
     let vs' = evalSize (env cxt) s'
     
-    if vs' < size || (vs' == VOmega && size == VOmega) then 
+    if vs' < size || size == VOmega then 
       pure $ U s'
     else report cxt ("Size issue: U " ++ showSize cxt vs' ++ " is too large to fit in U " ++ showSize cxt size)
 
@@ -327,7 +327,6 @@ isRec d (RVar y) = y == d
 isRec d (RApp f _) = isRec d f
 isRec d _ = False
 
--- TODO: double check this, should probably be integrated by default
 checkInfRec :: VSize -> Name -> Cxt -> Raw -> M (Maybe Desc)
 checkInfRec uLevel dName c = \case
   RSrcPos pos t -> checkInfRec uLevel dName (c {pos = pos}) t
@@ -344,7 +343,6 @@ checkInfRec uLevel dName c = \case
         Nothing -> pure Nothing
   _ -> pure Nothing
 
--- TODO : rethink this function, probably we can simplify it
 -- Elaborates the description associated to a raw term : second premise of rule (b)
 elabConstrDesc :: VSize -> Name -> Cxt -> Raw -> M Desc
 elabConstrDesc uLevel dName c = \case
