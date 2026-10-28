@@ -25,14 +25,11 @@ displayError file (msg, SourcePos path (unPos -> linum) (unPos -> colnum)) = do
 
 helpMsg :: String
 helpMsg = unlines [
-  "usage: elabzoo-univ-lifts <mode> <filepath>",
+  "usage: implem-fuss-free <mode> <filepath>",
   "modes:",
   "  nf <file>      : read & elaborate expression from file, print its normal form and type",
   "  elab <file>    : read & elaborate expression from file, print output",
-  "  type <file>    : read & elaborate expression from file, print its type",
-  "",
-  "example:",
-  "  runhaskell Datatypes.hs nf test/ex1.txt"
+  "  type <file>    : read & elaborate expression from file, print its type"
   ]
 
 main :: IO ()
